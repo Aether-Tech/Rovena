@@ -1,0 +1,40 @@
+{
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:VeroChat}",
+            "name": "Debug VeroChat",
+            "program": "${workspaceFolder:VeroChat}/.build/debug/VeroChat",
+            "preLaunchTask": "swift: Build Debug VeroChat"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:VeroChat}",
+            "name": "Release VeroChat",
+            "program": "${workspaceFolder:VeroChat}/.build/release/VeroChat",
+            "preLaunchTask": "swift: Build Release VeroChat"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:Rovena}",
+            "name": "Debug Rovena",
+            "program": "${workspaceFolder:Rovena}/.build/debug/Rovena",
+            "preLaunchTask": "swift: Build Debug Rovena"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:Rovena}",
+            "name": "Release Rovena",
+            "program": "${workspaceFolder:Rovena}/.build/release/Rovena",
+            "preLaunchTask": "swift: Build Release Rovena"
+        }
+    ]
+}

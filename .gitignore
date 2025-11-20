@@ -1,0 +1,46 @@
+# Xcode & Swift
+.DS_Store
+.build/
+/.build
+/Packages
+/*.xcodeproj
+xcuserdata/
+DerivedData/
+.swiftpm/
+*.xcworkspace
+
+# App Bundle (generated)
+*.app
+!Rovena.app
+
+# DMG (keep the installer)
+# Rovena-Installer.dmg is tracked
+
+# Icon generation temp files
+*.iconset
+*.icns
+
+# Temporary files
+*.tmp
+*.log
+*.swp
+*~
+
+# Build scripts output
+dmg_temp/
+
+# Firebase
+# GoogleService-Info.plist is tracked for distribution
+
+# macOS
+.Spotlight-V100
+.Trashes
+._*
+
+# User data (generated at runtime)
+chat_history.json
+canvas_elements.json
+
+# Scripts (keep them)
+# *.sh files are tracked
+
