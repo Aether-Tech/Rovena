@@ -63,26 +63,27 @@ struct ProfileView: View {
                     Button(action: { showLogoutAlert = true }) {
                         HStack {
                             Image(systemName: "power")
-                            Text("TERMINATE_SESSION")
+                            Text("Sign Out")
                         }
                         .font(DesignSystem.font(size: 14))
                         .foregroundColor(.red)
                         .frame(maxWidth: .infinity)
                         .padding()
-                        .background(Color.red.opacity(0.1))
+                        .background(DesignSystem.surface)
+                        .cornerRadius(DesignSystem.cornerRadius)
                         .overlay(
-                            Rectangle()
-                                .stroke(Color.red.opacity(0.5), lineWidth: 1)
+                            RoundedRectangle(cornerRadius: DesignSystem.cornerRadius)
+                                .stroke(Color.red.opacity(0.3), lineWidth: 1)
                         )
                     }
                     .buttonStyle(.plain)
                     .confirmationDialog("Are you sure you want to logout?", isPresented: $showLogoutAlert) {
-                        Button("Confirm Termination", role: .destructive) {
+                        Button("Sign Out", role: .destructive) {
                             authManager.signOut()
                         }
                         Button("Cancel", role: .cancel) { }
                     } message: {
-                        Text("This will end your current encrypted session.")
+                        Text("This will end your current session.")
                     }
                 }
                 .padding()
