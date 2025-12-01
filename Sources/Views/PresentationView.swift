@@ -1,5 +1,6 @@
 import SwiftUI
 import WebKit
+import AppKit
 
 enum ImageStyleOption: String, CaseIterable, Identifiable {
     case realism
@@ -63,17 +64,23 @@ enum PresentationLanguageOption: String, CaseIterable, Identifiable {
     var localeCode: String { rawValue }
 }
 
+// MARK: - Legacy PresentationView (mantido para compatibilidade)
+// Nova implementação está em PresentationMainView
+
 struct PresentationView: View {
     @State private var prompt: String = ""
     @State private var generatedMarkdown: String?
+    @State private var editableSlides: [PresentationService.SlideContent] = []
     @State private var showError = false
     @State private var errorMessage = ""
     @State private var debugLog: String = ""
     @State private var showDebugLog = false
     @State private var selectedImageStyle: ImageStyleOption = .realism
     @State private var selectedLanguage: PresentationLanguageOption = .portugueseBR
+    @State private var mentionQuery: String?
     
     @ObservedObject var presentationService = PresentationService.shared
+    @ObservedObject var chartService = ChartService.shared
     
     var body: some View {
         HStack(spacing: 0) {
@@ -88,7 +95,10 @@ struct PresentationView: View {
                     Spacer()
                     
                     if generatedMarkdown != nil {
-                        Button(action: { generatedMarkdown = nil }) {
+                        Button(action: {
+                            generatedMarkdown = nil
+                            editableSlides.removeAll()
+                        }) {
                             Image(systemName: "plus.circle")
                             Text("New")
                         }
@@ -159,7 +169,7 @@ struct PresentationView: View {
                     }
                     .background(DesignSystem.background)
                 } else if let markdown = generatedMarkdown {
-                    MarpPreview(markdown: markdown)
+                    MarpPreview(markdown: chartService.replaceMentions(in: markdown))
                 } else {
                     VStack(spacing: 20) {
                         Image(systemName: "doc.richtext")
@@ -221,6 +231,13 @@ struct PresentationView: View {
                                 .stroke(DesignSystem.border.opacity(0.5), lineWidth: 1)
                         )
                         .scrollContentBackground(.hidden)
+                        .onChange(of: prompt) { _, newValue in
+                            updatePromptMentionState(with: newValue)
+                        }
+                    
+                    mentionSuggestionMenu
+                    
+                    mentionTagSection
                 }
                 .padding(.horizontal)
                 
@@ -265,6 +282,9 @@ struct PresentationView: View {
                     .padding(.horizontal)
                 }
                 
+                ChartGeneratorView()
+                    .padding(.horizontal)
+                
                 Button(action: generatePresentation) {
                     HStack {
                         if presentationService.isGenerating {
@@ -306,16 +326,41 @@ struct PresentationView: View {
     }
     
     var editorView: some View {
-        VStack(spacing: 0) {
-            TextEditor(text: Binding(
-                get: { generatedMarkdown ?? "" },
-                set: { generatedMarkdown = $0 }
-            ))
-            .font(.system(size: 13, design: .monospaced))
-            .foregroundColor(DesignSystem.text)
+        ScrollView {
+            VStack(spacing: 20) {
+                slideEditorSection
+                ChartMentionHelperView()
+                ChartGeneratorView()
+            }
             .padding()
-            .scrollContentBackground(.hidden)
-            .background(DesignSystem.background)
+        }
+        .background(DesignSystem.background)
+    }
+    
+    @ViewBuilder
+    private var slideEditorSection: some View {
+        if editableSlides.isEmpty {
+            VStack(spacing: 12) {
+                Image(systemName: "rectangle.stack.badge.play")
+                    .font(.system(size: 36))
+                    .foregroundColor(DesignSystem.text.opacity(0.2))
+                Text("Os blocos de slides aparecerão aqui para edição.")
+                    .font(DesignSystem.font(size: 13))
+                    .foregroundColor(DesignSystem.text.opacity(0.6))
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity)
+            .padding()
+        } else {
+            LazyVStack(spacing: 16) {
+                ForEach(editableSlides.indices, id: \.self) { index in
+                    SlideEditorCard(
+                        slide: $editableSlides[index],
+                        slideIndex: index + 1,
+                        onChange: refreshMarkdownFromSlides
+                    )
+                }
+            }
         }
     }
     
@@ -333,6 +378,7 @@ struct PresentationView: View {
                 case .success(let markdown):
                     withAnimation {
                         generatedMarkdown = markdown
+                        editableSlides = presentationService.lastSlides
                     }
                 case .failure(let error):
                     errorMessage = error.localizedDescription
@@ -344,15 +390,21 @@ struct PresentationView: View {
     
     func exportPDF() {
         guard let markdown = generatedMarkdown else { return }
+        let resolvedMarkdown = chartService.replaceMentions(in: markdown)
+        let markdownData = resolvedMarkdown.data(using: .utf8) ?? Data()
+        let base64Markdown = markdownData.base64EncodedString()
         
         // Create a temporary HTML file with Marp loaded
         let html = """
         <!DOCTYPE html>
         <html><body>
         <script src="https://cdn.jsdelivr.net/npm/@marp-team/marp-core/browser.js"></script>
-        <textarea id="markdown" style="display:none">\(markdown)</textarea>
+        <textarea id="markdown" style="display:none"></textarea>
         <div id="preview"></div>
         <script>
+          const encodedMarkdown = "\(base64Markdown)";
+          const decodedMarkdown = atob(encodedMarkdown);
+          document.getElementById('markdown').value = decodedMarkdown;
           const marp = new Marp.Marp()
           const { html, css } = marp.render(document.getElementById('markdown').value)
           document.getElementById('preview').innerHTML = html
@@ -376,6 +428,308 @@ struct PresentationView: View {
             }
         }
     }
+    
+    private func refreshMarkdownFromSlides() {
+        guard !editableSlides.isEmpty else { return }
+        generatedMarkdown = presentationService.assembleMarkdown(slides: editableSlides)
+    }
+    
+    private func updatePromptMentionState(with text: String) {
+        guard !text.isEmpty else {
+            mentionQuery = nil
+            return
+        }
+        
+        let pattern = #"@([A-Za-z0-9\-]*)$"#
+        if let range = text.range(of: pattern, options: .regularExpression) {
+            let token = text[range]
+            mentionQuery = String(token.dropFirst())
+        } else {
+            mentionQuery = nil
+        }
+    }
+    
+    private func insertMention(_ chart: GeneratedChart) {
+        guard let range = prompt.range(of: #"@([A-Za-z0-9\-]*)$"#, options: .regularExpression) else {
+            mentionQuery = nil
+            return
+        }
+        
+        prompt.replaceSubrange(range, with: "\(chart.mentionToken) ")
+        mentionQuery = nil
+    }
+    
+    private var promptMentions: [GeneratedChart] {
+        chartService.charts.filter { prompt.localizedCaseInsensitiveContains($0.mentionToken) }
+    }
+    
+    private var mentionSuggestions: [GeneratedChart] {
+        guard let query = mentionQuery else { return [] }
+        let normalized = query.lowercased()
+        if normalized.isEmpty {
+            return chartService.charts
+        }
+        return chartService.charts.filter {
+            $0.handle.lowercased().contains(normalized) ||
+            $0.title.lowercased().contains(normalized)
+        }
+    }
+    
+    private var shouldShowMentionMenu: Bool {
+        mentionQuery != nil && !mentionSuggestions.isEmpty
+    }
+    
+    @ViewBuilder
+    private var mentionSuggestionMenu: some View {
+        if shouldShowMentionMenu {
+            VStack(alignment: .leading, spacing: 6) {
+                Label("Mencionar gráfico", systemImage: "at")
+                    .font(DesignSystem.font(size: 11, weight: .medium))
+                    .foregroundColor(DesignSystem.text.opacity(0.7))
+                
+                ForEach(mentionSuggestions) { chart in
+                    Button {
+                        insertMention(chart)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(chart.mentionToken)
+                                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                                .foregroundColor(DesignSystem.accent)
+                            Text(chart.title)
+                                .font(DesignSystem.font(size: 12))
+                                .foregroundColor(DesignSystem.text.opacity(0.8))
+                                .lineLimit(1)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(8)
+                        .background(DesignSystem.surface.opacity(0.7))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(10)
+            .background(DesignSystem.background)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(DesignSystem.border.opacity(0.4), lineWidth: 1)
+            )
+            .transition(.opacity.combined(with: .move(edge: .top)))
+        }
+    }
+    
+    @ViewBuilder
+    private var mentionTagSection: some View {
+        if !promptMentions.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                Label("Menções detectadas", systemImage: "tag")
+                    .font(DesignSystem.font(size: 11, weight: .medium))
+                    .foregroundColor(DesignSystem.text.opacity(0.7))
+                
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 8)], alignment: .leading, spacing: 8) {
+                    ForEach(promptMentions) { chart in
+                        HStack(spacing: 8) {
+                            MentionTag(mention: chart.mentionToken)
+                            Text(chart.title)
+                                .font(DesignSystem.font(size: 11))
+                                .foregroundColor(DesignSystem.text.opacity(0.7))
+                                .lineLimit(1)
+                        }
+                        .padding(8)
+                        .background(DesignSystem.surface.opacity(0.6))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                }
+            }
+            .padding(10)
+            .background(DesignSystem.surface.opacity(0.4))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .transition(.opacity.combined(with: .move(edge: .top)))
+        }
+    }
+}
+
+private struct SlideEditorCard: View {
+    @Binding var slide: PresentationService.SlideContent
+    let slideIndex: Int
+    let onChange: () -> Void
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Slide \(slideIndex)")
+                    .font(DesignSystem.font(size: 13, weight: .semibold))
+                    .foregroundColor(DesignSystem.text)
+                Spacer()
+                if let style = slide.visualStyle {
+                    Text(style.replacingOccurrences(of: "-", with: " ").capitalized)
+                        .font(DesignSystem.font(size: 11, weight: .medium))
+                        .foregroundColor(DesignSystem.text.opacity(0.6))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(DesignSystem.surface.opacity(0.5))
+                        .clipShape(Capsule())
+                }
+            }
+            
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Título")
+                    .font(DesignSystem.font(size: 11, weight: .medium))
+                    .foregroundColor(DesignSystem.text.opacity(0.7))
+                TextField("Título do slide", text: $slide.title)
+                    .textFieldStyle(.roundedBorder)
+                    .onChange(of: slide.title) { _, _ in onChange() }
+            }
+            
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Highlight")
+                    .font(DesignSystem.font(size: 11, weight: .medium))
+                    .foregroundColor(DesignSystem.text.opacity(0.7))
+                TextField("Resumo/insight do slide", text: Binding(
+                    get: { slide.highlight ?? "" },
+                    set: {
+                        slide.highlight = $0.isEmpty ? nil : $0
+                        onChange()
+                    }
+                ))
+                .textFieldStyle(.roundedBorder)
+            }
+            
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Conteúdo (bullets)")
+                    .font(DesignSystem.font(size: 11, weight: .medium))
+                    .foregroundColor(DesignSystem.text.opacity(0.7))
+                TextEditor(text: $slide.content)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundColor(DesignSystem.text)
+                    .frame(minHeight: 120)
+                    .padding(8)
+                    .background(DesignSystem.surface.opacity(0.5))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(DesignSystem.border.opacity(0.4), lineWidth: 1)
+                    )
+                    .onChange(of: slide.content) { _, _ in onChange() }
+            }
+            
+            if let url = slide.imageUrl {
+                HStack(spacing: 6) {
+                    Image(systemName: "photo")
+                        .font(.system(size: 12))
+                    Text(url.absoluteString)
+                        .font(DesignSystem.font(size: 11))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                .foregroundColor(DesignSystem.text.opacity(0.5))
+            }
+        }
+        .padding(14)
+        .background(DesignSystem.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(DesignSystem.border.opacity(0.6), lineWidth: 1)
+        )
+    }
+}
+
+private struct ChartMentionHelperView: View {
+    @ObservedObject private var chartService = ChartService.shared
+    @State private var copyFeedback: String?
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("Gráficos disponíveis", systemImage: "chart.bar.doc.horizontal")
+                    .font(DesignSystem.font(size: 13, weight: .semibold))
+                    .foregroundColor(DesignSystem.text.opacity(0.8))
+                Spacer()
+                if let copyFeedback {
+                    Text(copyFeedback)
+                        .font(DesignSystem.font(size: 11, weight: .medium))
+                        .foregroundColor(DesignSystem.accent)
+                        .transition(.opacity)
+                }
+            }
+            
+            Text("Digite o handle (ex: @grafico1) em qualquer slide para injetar automaticamente o gráfico renderizado no preview e na exportação.")
+                .font(DesignSystem.font(size: 12))
+                .foregroundColor(DesignSystem.text.opacity(0.65))
+            
+            if chartService.charts.isEmpty {
+                Text("Nenhum gráfico salvo ainda. Gere um abaixo e utilize o handle @graficoX nos campos de conteúdo.")
+                    .font(DesignSystem.font(size: 12))
+                    .foregroundColor(DesignSystem.text.opacity(0.5))
+                    .padding(.vertical, 6)
+            } else {
+                VStack(spacing: 12) {
+                    ForEach(chartService.charts) { chart in
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack(alignment: .firstTextBaseline) {
+                                Text(chart.mentionToken)
+                                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                                    .foregroundColor(DesignSystem.accent)
+                                Spacer()
+                                Button {
+                                    copyMention(chart.mentionToken)
+                                } label: {
+                                    Label("Copiar", systemImage: "doc.on.doc")
+                                        .labelStyle(.iconOnly)
+                                }
+                                .buttonStyle(.plain)
+                                .help("Copiar \(chart.mentionToken)")
+                            }
+                            
+                            Text(chart.title)
+                                .font(DesignSystem.font(size: 12, weight: .medium))
+                                .foregroundColor(DesignSystem.text)
+                            
+                            if let base64 = chart.imageBase64,
+                               let data = Data(base64Encoded: base64),
+                               let nsImage = NSImage(data: data) {
+                                Image(nsImage: nsImage)
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fit)
+                                    .frame(maxHeight: 140)
+                                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                            } else {
+                                Text("Prévia indisponível. Regere o gráfico para visualizar.")
+                                    .font(DesignSystem.font(size: 11))
+                                    .foregroundColor(.red)
+                            }
+                        }
+                        .padding(12)
+                        .background(DesignSystem.surface.opacity(0.8))
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10)
+                                .stroke(DesignSystem.border.opacity(0.4), lineWidth: 1)
+                        )
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .background(DesignSystem.surface.opacity(0.5))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .animation(.easeInOut(duration: 0.2), value: copyFeedback)
+    }
+    
+    private func copyMention(_ mention: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(mention, forType: .string)
+        withAnimation {
+            copyFeedback = "\(mention) copiado!"
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            withAnimation {
+                copyFeedback = nil
+            }
+        }
+    }
 }
 
 // Simple Preview without Marp dependency
@@ -384,10 +738,42 @@ struct MarpPreview: NSViewRepresentable {
     
     func makeNSView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
-        return WKWebView(frame: .zero, configuration: config)
+        config.preferences.setValue(true, forKey: "developerExtrasEnabled")
+        let webView = WKWebView(frame: .zero, configuration: config)
+        webView.navigationDelegate = context.coordinator
+        webView.allowsMagnification = false
+        webView.allowsBackForwardNavigationGestures = false
+        
+        // Load empty page initially
+        webView.loadHTMLString("<html><body></body></html>", baseURL: nil)
+        
+        return webView
+    }
+    
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
     }
     
     func updateNSView(_ nsView: WKWebView, context: Context) {
+        // Only update if markdown changed to avoid unnecessary re-rendering
+        guard context.coordinator.lastMarkdown != markdown, !markdown.isEmpty else {
+            return
+        }
+        
+        context.coordinator.lastMarkdown = markdown
+        
+        // Process markdown on background thread
+        let markdownToProcess = markdown
+        DispatchQueue.global(qos: .userInitiated).async {
+            let htmlContent = self.processMarkdown(markdownToProcess)
+            
+            DispatchQueue.main.async {
+                nsView.loadHTMLString(htmlContent, baseURL: nil)
+            }
+        }
+    }
+    
+    private func processMarkdown(_ markdown: String) -> String {
         // Remove front-matter
         var bodyMarkdown = markdown
         if bodyMarkdown.hasPrefix("---") {
@@ -569,7 +955,11 @@ struct MarpPreview: NSViewRepresentable {
         </body>
         </html>
         """
-        nsView.loadHTMLString(htmlContent, baseURL: nil)
+        return htmlContent
+    }
+    
+    class Coordinator: NSObject, WKNavigationDelegate {
+        var lastMarkdown: String = ""
     }
     
     private func convertMarkdownToHTML(_ text: String) -> String {
@@ -623,5 +1013,21 @@ struct MarpPreview: NSViewRepresentable {
         result = result.replacingOccurrences(of: #"\*\*(.+?)\*\*"#, with: "<strong>$1</strong>", options: .regularExpression)
         result = result.replacingOccurrences(of: #"_([^_]+)_"#, with: "<em>$1</em>", options: .regularExpression)
         return result
+    }
+}
+
+// MARK: - Mention Tag Component
+
+struct MentionTag: View {
+    let mention: String
+    
+    var body: some View {
+        Text(mention)
+            .font(DesignSystem.font(size: 11, weight: .semibold))
+            .foregroundColor(.white)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(DesignSystem.accent)
+            .clipShape(SquircleShape())
     }
 }

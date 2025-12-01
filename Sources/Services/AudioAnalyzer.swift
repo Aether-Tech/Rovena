@@ -4,6 +4,7 @@ import Accelerate
 import ScreenCaptureKit
 import OSLog
 
+@MainActor
 class AudioAnalyzer: NSObject, ObservableObject {
     static let shared = AudioAnalyzer()
     
@@ -63,7 +64,7 @@ class AudioAnalyzer: NSObject, ObservableObject {
                 
                 self.stream = stream
                 
-                DispatchQueue.main.async {
+                await MainActor.run {
                     self.isRunning = true
                 }
                 
@@ -71,7 +72,7 @@ class AudioAnalyzer: NSObject, ObservableObject {
                 
             } catch {
                 print("Failed to start audio capture: \(error)")
-                DispatchQueue.main.async {
+                await MainActor.run {
                     self.hasPermission = false // Likely denied if failed immediately
                 }
             }
@@ -85,7 +86,7 @@ class AudioAnalyzer: NSObject, ObservableObject {
             try? await stream?.stopCapture()
             stream = nil
             
-            DispatchQueue.main.async {
+            await MainActor.run {
                 self.isRunning = false
                 self.levels = Array(repeating: 0.1, count: 15)
             }
@@ -119,7 +120,7 @@ class AudioAnalyzer: NSObject, ObservableObject {
             let gain: Float = 5.0
             let normalizedRMS = min(max(rms * gain, 0), 1)
             
-            DispatchQueue.main.async {
+            Task { @MainActor in
                 // Update visualizer levels
                 var newLevels: [Float] = []
                 for _ in 0..<15 {
@@ -134,8 +135,10 @@ class AudioAnalyzer: NSObject, ObservableObject {
 }
 
 extension AudioAnalyzer: SCStreamOutput {
-    func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
+    nonisolated func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
         guard type == .audio else { return }
-        processAudioBuffer(sampleBuffer)
+        Task { @MainActor in
+            processAudioBuffer(sampleBuffer)
+        }
     }
 }

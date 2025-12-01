@@ -41,6 +41,9 @@ dmg_temp/
 chat_history.json
 canvas_elements.json
 
+# Environment variables (contém chaves secretas)
+.env
+
 # Scripts (keep them)
 # *.sh files are tracked
 

@@ -8,12 +8,13 @@ struct HomeView: View {
     @FocusState private var isInputFocused: Bool
     @ObservedObject var historyService = HistoryService.shared
     @ObservedObject var todoService = ToDoService.shared
+    @ObservedObject var tokenService = TokenService.shared
     
     var body: some View {
         VStack(alignment: .leading, spacing: 40) {
             // Header Section
             VStack(alignment: .leading, spacing: 10) {
-                Text("Welcome back")
+                Text(welcomeMessage)
                     .font(DesignSystem.font(size: 32, weight: .bold))
                     .foregroundColor(DesignSystem.text)
                 
@@ -39,8 +40,44 @@ struct HomeView: View {
                 StatCard(title: "Total Sessions", value: "\(historyService.sessions.count)")
                 StatCard(title: "Total Messages", value: "\(totalMessages)")
                 StatCard(title: "Archived", value: "\(archivedCount)")
+                
+                // Token counter - sempre mostra se useRovenaCloud estiver ativo
+                if SettingsManager.shared.useRovenaCloud {
+                    TokenStatCard()
+                }
             }
             .padding(.horizontal)
+            
+            // Upgrade Button for FREE users
+            if SettingsManager.shared.useRovenaCloud && tokenService.currentPlan == "FREE" {
+                Button(action: {
+                    let subscriptionURL = "https://buy.stripe.com/eVqeV6fIa4Ri0pQ5f2eZ203"
+                    if let url = URL(string: subscriptionURL) {
+                        NSWorkspace.shared.open(url)
+                    }
+                }) {
+                    HStack(spacing: 12) {
+                        Image(systemName: "star.fill")
+                            .font(.system(size: 16))
+                        Text("Upgrade to Rovena+")
+                            .font(DesignSystem.font(size: 15, weight: .semibold))
+                    }
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+                    .background(
+                        LinearGradient(
+                            colors: [DesignSystem.accent, DesignSystem.accent.opacity(0.8)],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .clipShape(SquircleShape())
+                    .shadow(color: DesignSystem.accent.opacity(0.3), radius: 8, x: 0, y: 4)
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal)
+            }
             
             // Dashboard Grid
             VStack(alignment: .leading, spacing: 20) {
@@ -98,6 +135,10 @@ struct HomeView: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 isInputFocused = true
             }
+            // Sincronizar tokens ao abrir home
+            if SettingsManager.shared.useRovenaCloud {
+                tokenService.syncWithStripe()
+            }
         }
     }
     
@@ -107,6 +148,13 @@ struct HomeView: View {
     
     private var archivedCount: Int {
         historyService.sessions.filter { $0.creationDate < Date().addingTimeInterval(-86400) }.count
+    }
+    
+    private var welcomeMessage: String {
+        if let userName = AuthManager.shared.userName, !userName.isEmpty {
+            return "Bem vindo de volta, \(userName)"
+        }
+        return "Welcome back"
     }
     
     private func startNewSession() {
@@ -128,18 +176,169 @@ struct StatCard: View {
     let value: String
     
     var body: some View {
-        VStack(alignment: .leading) {
+        VStack(alignment: .leading, spacing: 8) {
             Text(title)
                 .font(DesignSystem.font(size: 12))
                 .foregroundColor(DesignSystem.text.opacity(0.6))
+                .lineLimit(1)
             
             Text(value)
                 .font(DesignSystem.font(size: 24, weight: .bold))
                 .foregroundColor(DesignSystem.text)
+                .lineLimit(1)
+            
+            Spacer(minLength: 0)
         }
         .padding()
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(minWidth: 160, maxWidth: .infinity, minHeight: 140, alignment: .topLeading)
         .elementStyle()
+    }
+}
+
+struct TokenStatCard: View {
+    @ObservedObject var tokenService = TokenService.shared
+    
+    private var usageColor: Color {
+        guard tokenService.monthlyLimit > 0 else { return DesignSystem.accent }
+        let usage = tokenService.usagePercentage()
+        if usage >= 0.9 {
+            return .red
+        } else if usage >= 0.7 {
+            return .orange
+        } else {
+            return DesignSystem.accent
+        }
+    }
+    
+    private var remainingPercentage: Double {
+        guard tokenService.monthlyLimit > 0 else { return 100.0 }
+        return tokenService.remainingPercentage() * 100
+    }
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Tokens")
+                    .font(DesignSystem.font(size: 12))
+                    .foregroundColor(DesignSystem.text.opacity(0.6))
+                    .lineLimit(1)
+                
+                Spacer()
+                
+                Text(tokenService.currentPlan)
+                    .font(DesignSystem.font(size: 10, weight: .medium))
+                    .foregroundColor(planColor(tokenService.currentPlan))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(planColor(tokenService.currentPlan).opacity(0.15))
+                    .clipShape(SquircleShape())
+                    .lineLimit(1)
+            }
+            
+            if tokenService.monthlyLimit > 0 {
+                VStack(alignment: .leading, spacing: 6) {
+                    // Porcentagem restante grande
+                    Text("\(String(format: "%.0f", remainingPercentage))%")
+                        .font(DesignSystem.font(size: 24, weight: .bold))
+                        .foregroundColor(usageColor)
+                        .lineLimit(1)
+                    
+                    Text("remaining")
+                        .font(DesignSystem.font(size: 11))
+                        .foregroundColor(DesignSystem.text.opacity(0.6))
+                        .lineLimit(1)
+                    
+                    // Barra de progresso (mostra restante)
+                    TokenProgressBar(
+                        remaining: remainingPercentage,
+                        color: usageColor
+                    )
+                    .frame(height: 8)
+                    
+                    // Info adicional
+                    HStack(spacing: 4) {
+                        Text("\(formatTokenCount(tokenService.remainingTokens())) left")
+                            .font(DesignSystem.font(size: 10))
+                            .foregroundColor(DesignSystem.text.opacity(0.5))
+                            .lineLimit(1)
+                        
+                        Text("•")
+                            .font(DesignSystem.font(size: 10))
+                            .foregroundColor(DesignSystem.text.opacity(0.3))
+                        
+                        Text("\(formatTokenCount(tokenService.tokensUsedLast30Days))/\(formatTokenCount(tokenService.monthlyLimit)) used")
+                            .font(DesignSystem.font(size: 10))
+                            .foregroundColor(DesignSystem.text.opacity(0.5))
+                            .lineLimit(1)
+                    }
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("∞")
+                        .font(DesignSystem.font(size: 24, weight: .bold))
+                        .foregroundColor(DesignSystem.accent)
+                        .lineLimit(1)
+                    
+                    Text("Unlimited")
+                        .font(DesignSystem.font(size: 11))
+                        .foregroundColor(DesignSystem.text.opacity(0.6))
+                        .lineLimit(1)
+                }
+            }
+            
+            Spacer(minLength: 0)
+        }
+        .padding()
+        .frame(minWidth: 200, maxWidth: .infinity, minHeight: 150, alignment: .topLeading)
+        .elementStyle()
+    }
+    
+    private func formatTokenCount(_ count: Int) -> String {
+        if count >= 1_000_000 {
+            return String(format: "%.1fM", Double(count) / 1_000_000.0)
+        } else if count >= 1_000 {
+            return String(format: "%.1fK", Double(count) / 1_000.0)
+        } else {
+            return "\(count)"
+        }
+    }
+    
+    private func planColor(_ plan: String) -> Color {
+        switch plan.uppercased() {
+        case "FREE": return .gray
+        case "BASIC": return .blue
+        case "PRO": return DesignSystem.accent
+        case "ENTERPRISE": return .purple
+        default: return DesignSystem.accent
+        }
+    }
+}
+
+// Componente reutilizável de barra de progresso de tokens
+struct TokenProgressBar: View {
+    let remaining: Double // Porcentagem restante (0-100)
+    let color: Color
+    
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .leading) {
+                // Fundo
+                Rectangle()
+                    .fill(DesignSystem.text.opacity(0.1))
+                    .frame(width: geometry.size.width, height: geometry.size.height)
+                    .clipShape(SquircleShape())
+                
+                // Barra de progresso (mostra restante)
+                Rectangle()
+                    .fill(color)
+                    .frame(
+                        width: max(0, min(geometry.size.width, geometry.size.width * CGFloat(remaining / 100.0))),
+                        height: geometry.size.height
+                    )
+                    .clipShape(SquircleShape())
+                    .animation(.spring(response: 0.3, dampingFraction: 0.7), value: remaining)
+            }
+        }
     }
 }
 

@@ -196,7 +196,9 @@ struct ToDoRow: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 12) {
                 Button(action: {
-                    ToDoService.shared.toggleItem(item.id)
+                    DispatchQueue.main.async {
+                        ToDoService.shared.toggleItem(item.id)
+                    }
                 }) {
                     Image(systemName: item.isCompleted ? "checkmark.circle.fill" : "circle")
                         .foregroundColor(item.isCompleted ? .green : DesignSystem.text.opacity(0.5))
@@ -214,7 +216,9 @@ struct ToDoRow: View {
                 // Delete Icon on Hover
                 if isHovered {
                     Button(action: {
-                        ToDoService.shared.deleteItem(item.id)
+                        DispatchQueue.main.async {
+                            ToDoService.shared.deleteItem(item.id)
+                        }
                     }) {
                         Image(systemName: "trash")
                             .font(.system(size: 14))

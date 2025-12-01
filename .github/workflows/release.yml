@@ -1,0 +1,113 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'  # Trigger quando uma tag v* é criada (ex: v1.0.0)
+  workflow_dispatch:  # Permite trigger manual
+
+jobs:
+  build:
+    runs-on: macos-14
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Swift
+        uses: swift-actions/setup-swift@v1
+        with:
+          swift-version: "5.9"
+      
+      - name: Build app
+        run: |
+          swift build -c release
+          mkdir -p Rovena.app/Contents/MacOS
+          mkdir -p Rovena.app/Contents/Resources
+          cp .build/release/Rovena Rovena.app/Contents/MacOS/
+          chmod +x Rovena.app/Contents/MacOS/Rovena
+      
+      - name: Copy resources
+        run: |
+          if [ -f "Sources/App/GoogleService-Info.plist" ]; then
+            cp Sources/App/GoogleService-Info.plist Rovena.app/Contents/Resources/
+          fi
+          if [ -f "Sources/Config.plist" ]; then
+            cp Sources/Config.plist Rovena.app/Contents/Resources/
+          fi
+          if [ -f "Sources/Documents/TermsAndConditions.md" ]; then
+            cp Sources/Documents/TermsAndConditions.md Rovena.app/Contents/Resources/
+          fi
+      
+      - name: Create Info.plist
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          cat > Rovena.app/Contents/Info.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleExecutable</key>
+              <string>Rovena</string>
+              <key>CFBundleIconFile</key>
+              <string>AppIcon</string>
+              <key>CFBundleIdentifier</key>
+              <string>com.rovena.app</string>
+              <key>CFBundleName</key>
+              <string>Rovena</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+              <key>CFBundleShortVersionString</key>
+              <string>${VERSION}</string>
+              <key>CFBundleVersion</key>
+              <string>${VERSION}</string>
+              <key>LSMinimumSystemVersion</key>
+              <string>14.0</string>
+              <key>NSHighResolutionCapable</key>
+              <true/>
+              <key>SUFeedURL</key>
+              <string>https://raw.githubusercontent.com/${{ github.repository }}/main/appcast.xml</string>
+          </dict>
+          </plist>
+          EOF
+      
+      - name: Code sign (if certificate available)
+        if: ${{ secrets.MACOS_CERTIFICATE_BASE64 != '' }}
+        run: |
+          # Descomente se tiver certificado de desenvolvedor
+          # echo "${{ secrets.MACOS_CERTIFICATE_BASE64 }}" | base64 --decode > certificate.p12
+          # security create-keychain -p "" build.keychain
+          # security default-keychain -s build.keychain
+          # security unlock-keychain -p "" build.keychain
+          # security import certificate.p12 -k build.keychain -P "${{ secrets.MACOS_CERTIFICATE_PASSWORD }}" -T /usr/bin/codesign
+          # security set-key-partition-list -S apple-tool:,apple: -s -k "" build.keychain
+          # codesign --force --sign "Developer ID Application: ..." --entitlements Rovena.entitlements --deep Rovena.app
+          echo "⚠️  Code signing skipped (configure certificates in secrets)"
+      
+      - name: Create DMG
+        run: |
+          # Instalar create-dmg se necessário
+          if ! command -v create-dmg &> /dev/null; then
+            brew install create-dmg || echo "create-dmg not available, skipping DMG creation"
+          fi
+          
+          # Criar DMG básico
+          hdiutil create -volname "Rovena" -srcfolder Rovena.app -ov -format UDZO "Rovena-${VERSION}.dmg" || echo "DMG creation failed, will upload app bundle"
+      
+      - name: Generate appcast
+        run: |
+          chmod +x generate_appcast.sh
+          ./generate_appcast.sh || echo "Appcast generation skipped"
+      
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            Rovena-*.dmg
+            Rovena.app.zip
+            appcast.xml
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+

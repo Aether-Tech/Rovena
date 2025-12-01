@@ -10,7 +10,33 @@ enum AppTheme: String, CaseIterable, Identifiable {
 class SettingsManager: ObservableObject {
     static let shared = SettingsManager()
     
-    // When true, Rovena uses the cloud backend (your infra + Stripe) instead of direct provider keys.
+    // Chave de API padrão do Rovena Cloud
+    // Lê na seguinte ordem: .env > variável de ambiente > Config.plist
+    static var defaultRovenaAPIKey: String {
+        // 1. Primeiro tenta ler de arquivo .env (mais seguro, não commitado)
+        if let envKey = EnvLoader.getEnv("ROVENA_DEFAULT_API_KEY"), !envKey.isEmpty {
+            return envKey
+        }
+        
+        // 2. Depois tenta variável de ambiente do sistema (útil para builds/CI)
+        if let envKey = ProcessInfo.processInfo.environment["ROVENA_DEFAULT_API_KEY"], !envKey.isEmpty {
+            return envKey
+        }
+        
+        // 3. Por último tenta ler de Config.plist (fallback)
+        if let configPath = Bundle.main.path(forResource: "Config", ofType: "plist"),
+           let configDict = NSDictionary(contentsOfFile: configPath),
+           let apiKey = configDict["ROVENA_DEFAULT_API_KEY"] as? String, !apiKey.isEmpty {
+            return apiKey
+        }
+        
+        // Fallback: retorna string vazia (vai dar erro, mas é melhor que expor chave no código)
+        print("⚠️ [SettingsManager] ROVENA_DEFAULT_API_KEY não encontrada.")
+        print("   Configure em: .env, variável de ambiente ou Config.plist")
+        return ""
+    }
+    
+    // When true, Rovena uses the default API key instead of user's own keys.
     @Published var useRovenaCloud: Bool {
         didSet {
             UserDefaults.standard.set(useRovenaCloud, forKey: "useRovenaCloud")
@@ -53,6 +79,13 @@ class SettingsManager: ObservableObject {
         didSet { UserDefaults.standard.set(selectedTheme.rawValue, forKey: "selectedTheme") }
     }
     
+    @Published var selectedLanguage: AppLanguage {
+        didSet { 
+            UserDefaults.standard.set(selectedLanguage.rawValue, forKey: "app_language")
+            LocalizationService.shared.currentLanguage = selectedLanguage
+        }
+    }
+    
     init() {
         self.useRovenaCloud = UserDefaults.standard.object(forKey: "useRovenaCloud") as? Bool ?? true
         self.openAIKey = UserDefaults.standard.string(forKey: "openAIKey") ?? ""
@@ -66,6 +99,15 @@ class SettingsManager: ObservableObject {
             self.selectedTheme = theme
         } else {
             self.selectedTheme = .def
+        }
+        
+        if let languageString = UserDefaults.standard.string(forKey: "app_language"),
+           let language = AppLanguage(rawValue: languageString) {
+            self.selectedLanguage = language
+            LocalizationService.shared.currentLanguage = language
+        } else {
+            self.selectedLanguage = .portuguese // Default: Português Brasileiro
+            LocalizationService.shared.currentLanguage = .portuguese
         }
     }
     

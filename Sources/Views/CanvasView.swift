@@ -20,6 +20,7 @@ struct CanvasView: View {
     @State private var currentDragLocation: CGPoint?
     @State private var currentElement: CanvasElement?
     @State private var isPanning = false
+    @State private var lastHoverUpdate: Date = Date()
     
     // Text Editing
     @State private var editingElementId: UUID?
@@ -121,10 +122,23 @@ struct CanvasView: View {
                 )
                 .scrollZoomable(scale: $zoomScale)
             }
-            // Command + Scroll Zoom Listener & Hover Tracking
+            // Command + Scroll Zoom Listener & Hover Tracking (Only for Eraser)
             .onContinuousHover { phase in
+                guard currentTool == .eraser else { 
+                    // Clear drag location if tool changed
+                    if currentDragLocation != nil {
+                        currentDragLocation = nil
+                    }
+                    return 
+                }
+                
                 switch phase {
                 case .active(let location):
+                    // Throttle updates to avoid overwhelming the UI
+                    let now = Date()
+                    guard now.timeIntervalSince(lastHoverUpdate) > 0.01 else { return }
+                    lastHoverUpdate = now
+                    
                     let canvasLocation = CGPoint(x: location.x - totalOffset.width,
                                                  y: location.y - totalOffset.height)
                     currentDragLocation = canvasLocation
@@ -177,7 +191,7 @@ struct CanvasView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
             
             // Text Editing Overlay
-            if let id = editingElementId, let index = canvasService.elements.firstIndex(where: { $0.id == id }) {
+            if let id = editingElementId, canvasService.elements.firstIndex(where: { $0.id == id }) != nil {
                 VStack {
                     HStack {
                         TextField("Edit Text", text: $editText)

@@ -15,8 +15,15 @@ class CanvasService: ObservableObject {
     private let maxStackSize = 50
     
     private let fileName = "canvas_elements.json"
+    private let ioQueue = DispatchQueue(label: "com.rovena.canvas.io", qos: .userInitiated)
+    private var hasLoadedFromDisk = false
     
     private init() {
+        preloadIfNeeded()
+    }
+    
+    func preloadIfNeeded() {
+        guard !hasLoadedFromDisk else { return }
         loadElements()
     }
     
@@ -79,13 +86,31 @@ class CanvasService: ObservableObject {
     
     func loadElements() {
         let url = getFileURL()
-        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            hasLoadedFromDisk = true
+            return
+        }
         
-        do {
-            let data = try Data(contentsOf: url)
-            elements = try JSONDecoder().decode([CanvasElement].self, from: data)
-        } catch {
-            print("Error loading canvas elements: \(error)")
+        ioQueue.async { [weak self] in
+            guard let self else { return }
+            
+            do {
+                let data = try Data(contentsOf: url)
+                let decoded = try JSONDecoder().decode([CanvasElement].self, from: data)
+                
+                DispatchQueue.main.async {
+                    self.elements = decoded
+                    self.undoStack.removeAll()
+                    self.redoStack.removeAll()
+                    self.updateHistoryState()
+                    self.hasLoadedFromDisk = true
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.hasLoadedFromDisk = true
+                }
+                print("Error loading canvas elements: \(error)")
+            }
         }
     }
     

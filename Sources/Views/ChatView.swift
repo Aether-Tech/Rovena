@@ -349,13 +349,10 @@ struct ChatView: View {
     
     func sendMessage() {
         guard !prompt.isEmpty || selectedImageData != nil || attachedFileContent != nil else { return }
-        var input = prompt
+        let input = prompt // Keep only the user's text, not file content
         let imageData = selectedImageData
-        
-        // Append file content to prompt if exists
-        if let fileContent = attachedFileContent, let fileName = attachedFileName {
-            input += "\n\n[File Context: \(fileName)]\n\(fileContent)\n[End of File]"
-        }
+        let fileContent = attachedFileContent
+        let fileName = attachedFileName
         
         prompt = ""
         selectedImageData = nil
@@ -365,7 +362,8 @@ struct ChatView: View {
         ensureSessionExists()
         guard let sessionId = currentSessionId else { return }
         
-        let userMsg = ChatMessage(role: .user, content: input, imageData: imageData)
+        // Create message with file info but without file content in visible text
+        let userMsg = ChatMessage(role: .user, content: input, imageData: imageData, attachedFileName: fileName, attachedFileContent: fileContent)
         messages.append(userMsg)
         historyService.addMessage(userMsg, to: sessionId)
         
@@ -559,6 +557,11 @@ struct MessageBubble: View {
                 
                 // Content
                 VStack(alignment: .leading, spacing: 12) {
+                    // File Tag (if file is attached)
+                    if let fileName = message.attachedFileName {
+                        FileTag(fileName: fileName)
+                    }
+                    
                     // Uploaded Image
                     if let data = message.imageData, let nsImage = NSImage(data: data) {
                         Image(nsImage: nsImage)
@@ -757,5 +760,32 @@ struct MessageParser {
         }
         
         return parts
+    }
+}
+
+// MARK: - File Tag Component
+
+struct FileTag: View {
+    let fileName: String
+    
+    var body: some View {
+        HStack(spacing: 5) {
+            Text("@")
+                .font(DesignSystem.font(size: 12, weight: .semibold))
+                .foregroundColor(DesignSystem.accent.opacity(0.8))
+            
+            Text(fileName)
+                .font(DesignSystem.font(size: 12, weight: .medium))
+                .foregroundColor(DesignSystem.text.opacity(0.85))
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(DesignSystem.surface.opacity(0.5))
+        .clipShape(SquircleShape())
+        .overlay(
+            SquircleShape()
+                .stroke(DesignSystem.border.opacity(0.2), lineWidth: 0.5)
+        )
     }
 }

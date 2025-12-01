@@ -3,123 +3,151 @@ import SwiftUI
 struct LoginView: View {
     @StateObject private var authManager = AuthManager.shared
     @State private var isLoginMode = true
+    @State private var name = ""
     @State private var email = ""
     @State private var password = ""
-    
-    // Cyber Aesthetic Animations
-    @State private var appearAnimation = false
+    @State private var acceptedTerms = false
+    @State private var showTerms = false
     
     var body: some View {
         ZStack {
             DesignSystem.background.ignoresSafeArea()
             
-            // Background Matrix/Glitch effect hint
-            VStack {
-                HStack {
-                    Text("SECURE_CONNECTION // ESTABLISHING...")
-                        .font(DesignSystem.font(size: 10))
-                        .foregroundColor(DesignSystem.text.opacity(0.3))
-                    Spacer()
-                    Text("V.2.0.1")
-                        .font(DesignSystem.font(size: 10))
-                        .foregroundColor(DesignSystem.text.opacity(0.3))
+            VStack(spacing: 0) {
+                Spacer()
+                
+                VStack(spacing: 40) {
+                    // Logo / Header
+                    VStack(spacing: 16) {
+                        Image(systemName: "hexagon.fill")
+                            .font(.system(size: 80))
+                            .foregroundColor(DesignSystem.accent)
+                            .shadow(color: DesignSystem.accent.opacity(0.3), radius: 20, x: 0, y: 10)
+                        
+                        Text("Rovena")
+                            .font(DesignSystem.font(size: 36, weight: .bold))
+                            .foregroundColor(DesignSystem.text)
+                        
+                        Text(isLoginMode ? "Welcome back" : "Create your account")
+                            .font(DesignSystem.font(size: 16))
+                            .foregroundColor(DesignSystem.text.opacity(0.6))
+                    }
+                    
+                    // Form Card
+                    VStack(spacing: 20) {
+                        // Name field (only in signup mode)
+                        if !isLoginMode {
+                            ModernTextField(icon: "person", placeholder: "Name", text: $name)
+                        }
+                        
+                        ModernTextField(icon: "envelope", placeholder: "Email", text: $email)
+                        ModernTextField(icon: "lock", placeholder: "Password", text: $password, isSecure: true)
+                        
+                        // Terms and Conditions Checkbox (only show in signup mode)
+                        if !isLoginMode {
+                            HStack(spacing: 10) {
+                                Button(action: {
+                                    acceptedTerms.toggle()
+                                }) {
+                                    Image(systemName: acceptedTerms ? "checkmark.square.fill" : "square")
+                                        .foregroundColor(acceptedTerms ? DesignSystem.accent : DesignSystem.text.opacity(0.4))
+                                        .font(.system(size: 16))
+                                }
+                                .buttonStyle(.plain)
+                                
+                                HStack(spacing: 4) {
+                                    Text("I agree to the")
+                                        .font(DesignSystem.font(size: 12))
+                                        .foregroundColor(DesignSystem.text.opacity(0.7))
+                                    
+                                    Button(action: {
+                                        showTerms = true
+                                    }) {
+                                        Text("Terms and Conditions")
+                                            .font(DesignSystem.font(size: 12, weight: .medium))
+                                            .foregroundColor(DesignSystem.accent)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                            .frame(maxWidth: 400, alignment: .leading)
+                            .padding(.vertical, 4)
+                        }
+                        
+                        if let error = authManager.errorMessage {
+                            HStack(spacing: 8) {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.red)
+                                Text(error)
+                                    .font(DesignSystem.font(size: 12))
+                                    .foregroundColor(.red)
+                                    .multilineTextAlignment(.leading)
+                            }
+                            .frame(maxWidth: 400, alignment: .leading)
+                            .padding(12)
+                            .background(Color.red.opacity(0.1))
+                            .clipShape(SquircleShape())
+                            .overlay(
+                                SquircleShape()
+                                    .stroke(Color.red.opacity(0.3), lineWidth: 1)
+                            )
+                        }
+                        
+                        Button(action: handleAction) {
+                            HStack(spacing: 8) {
+                                if authManager.isLoading {
+                                    ProgressView()
+                                        .scaleEffect(0.8)
+                                        .tint(.white)
+                                }
+                                Text(isLoginMode ? "Sign In" : "Create Account")
+                                    .font(DesignSystem.font(size: 15, weight: .semibold))
+                            }
+                            .foregroundColor(.white)
+                            .frame(maxWidth: 400)
+                            .frame(height: 50)
+                            .background(canProceed ? DesignSystem.accent : DesignSystem.accent.opacity(0.5))
+                            .clipShape(SquircleShape())
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(authManager.isLoading || !canProceed)
+                        
+                        // Toggle Mode
+                        Button(action: {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                isLoginMode.toggle()
+                                authManager.errorMessage = nil
+                                acceptedTerms = false
+                                name = "" // Reset name when switching modes
+                            }
+                        }) {
+                            Text(isLoginMode ? "Don't have an account? Sign up" : "Already have an account? Sign in")
+                                .font(DesignSystem.font(size: 13))
+                                .foregroundColor(DesignSystem.accent)
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.top, 8)
+                    }
+                    .padding(32)
+                    .frame(maxWidth: 450)
+                    .elementStyle()
                 }
-                .padding()
+                .padding(40)
+                
                 Spacer()
             }
-            
-            VStack(spacing: 30) {
-                // Logo / Header
-                VStack(spacing: 10) {
-                    Image(nsImage: NSImage(named: "AppIcon") ?? NSImage())
-                        .resizable()
-                        .frame(width: 80, height: 80)
-                        .cornerRadius(16)
-                        .shadow(color: DesignSystem.accent.opacity(0.5), radius: 10)
-                    
-                    Text("Rovena")
-                        .font(DesignSystem.font(size: 40))
-                        .fontWeight(.bold)
-                        .foregroundColor(DesignSystem.text)
-                        .tracking(2)
-                    
-                    Text(isLoginMode ? "IDENTITY_VERIFICATION" : "NEW_USER_REGISTRATION")
-                        .font(DesignSystem.font(size: 12))
-                        .foregroundColor(DesignSystem.text.opacity(0.7))
-                        .tracking(4)
-                        .blinking()
-                }
-                .offset(y: appearAnimation ? 0 : -50)
-                .opacity(appearAnimation ? 1 : 0)
-                
-                // Form
-                VStack(spacing: 20) {
-                    CyberTextField(icon: "person", placeholder: "USER_EMAIL", text: $email)
-                    CyberTextField(icon: "key", placeholder: "ACCESS_CODE", text: $password, isSecure: true)
-                    
-                    if let error = authManager.errorMessage {
-                        ScrollView {
-                            Text(error)
-                                .font(DesignSystem.font(size: 9))
-                                .foregroundColor(.red)
-                                .multilineTextAlignment(.leading)
-                                .frame(maxWidth: 350)
-                                .padding(8)
-                                .background(Color.red.opacity(0.1))
-                                .border(Color.red.opacity(0.5), width: 1)
-                        }
-                        .frame(maxHeight: 150)
-                    }
-                    
-                    Button(action: handleAction) {
-                        HStack {
-                            if authManager.isLoading {
-                                ProgressView()
-                                    .scaleEffect(0.5)
-                                    .tint(DesignSystem.background)
-                            }
-                            Text(isLoginMode ? "AUTHENTICATE" : "INITIALIZE_USER")
-                                .font(DesignSystem.font(size: 14))
-                                .fontWeight(.bold)
-                                .tracking(1)
-                        }
-                        .foregroundColor(DesignSystem.background)
-                        .frame(width: 250, height: 50)
-                        .background(DesignSystem.accent)
-                        .overlay(
-                            Rectangle()
-                                .stroke(DesignSystem.text, lineWidth: 1)
-                                .offset(x: 4, y: 4)
-                                .opacity(0.5)
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(authManager.isLoading)
-                }
-                .offset(y: appearAnimation ? 0 : 50)
-                .opacity(appearAnimation ? 1 : 0)
-                
-                // Toggle Mode
-                Button(action: {
-                    withAnimation {
-                        isLoginMode.toggle()
-                        authManager.errorMessage = nil
-                    }
-                }) {
-                    Text(isLoginMode ? "CREATE_NEW_UPLINK >>" : "<< RETURN_TO_LOGIN")
-                        .font(DesignSystem.font(size: 12))
-                        .foregroundColor(DesignSystem.accent)
-                        .underline()
-                }
-                .buttonStyle(.plain)
-                .padding(.top, 20)
-                .opacity(appearAnimation ? 1 : 0)
-            }
         }
-        .onAppear {
-            withAnimation(.spring(response: 0.8, dampingFraction: 0.7)) {
-                appearAnimation = true
-            }
+        .sheet(isPresented: $showTerms) {
+            TermsAndConditionsView()
+        }
+    }
+    
+    private var canProceed: Bool {
+        if isLoginMode {
+            return !email.isEmpty && !password.isEmpty
+        } else {
+            return !name.isEmpty && !email.isEmpty && !password.isEmpty && acceptedTerms
         }
     }
     
@@ -127,40 +155,55 @@ struct LoginView: View {
         if isLoginMode {
             authManager.signIn(email: email, pass: password)
         } else {
-            authManager.signUp(email: email, pass: password)
+            guard !name.isEmpty else {
+                authManager.errorMessage = "Name is required"
+                return
+            }
+            guard acceptedTerms else {
+                authManager.errorMessage = "You must accept the Terms and Conditions to create an account"
+                return
+            }
+            authManager.signUp(email: email, pass: password, name: name)
         }
     }
 }
 
-struct CyberTextField: View {
+struct ModernTextField: View {
     let icon: String
     let placeholder: String
     @Binding var text: String
     var isSecure: Bool = false
-    @State private var isFocused = false
+    @FocusState private var isFocused: Bool
     
     var body: some View {
-        HStack {
+        HStack(spacing: 12) {
             Image(systemName: icon)
-                .foregroundColor(isFocused ? DesignSystem.accent : DesignSystem.text.opacity(0.5))
+                .foregroundColor(isFocused ? DesignSystem.accent : DesignSystem.text.opacity(0.4))
                 .frame(width: 20)
+                .font(.system(size: 14))
             
             if isSecure {
                 SecureField(placeholder, text: $text)
                     .textFieldStyle(.plain)
                     .font(DesignSystem.font(size: 14))
+                    .focused($isFocused)
             } else {
                 TextField(placeholder, text: $text)
                     .textFieldStyle(.plain)
                     .font(DesignSystem.font(size: 14))
+                    .focused($isFocused)
             }
         }
         .foregroundColor(DesignSystem.text)
-        .padding()
-        .frame(width: 300)
-        .background(DesignSystem.surface.opacity(0.05))
-        .border(isFocused ? DesignSystem.accent : DesignSystem.border, width: 1)
-        .onTapGesture { isFocused = true }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .frame(maxWidth: .infinity)
+        .background(DesignSystem.surface.opacity(0.5))
+        .clipShape(SquircleShape())
+        .overlay(
+            SquircleShape()
+                .stroke(isFocused ? DesignSystem.accent : DesignSystem.border, lineWidth: isFocused ? 2 : 1)
+        )
     }
 }
 

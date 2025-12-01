@@ -14,60 +14,69 @@ class AIService: ObservableObject {
     ]
     
     func sendMessage(_ messages: [ChatMessage], model: String = "gpt-3.5-turbo", completion: @escaping (Result<String, Error>) -> Void) {
-        if SettingsManager.shared.useRovenaCloud {
-            sendViaRovenaBackend(messages, model: model, completion: completion)
-            return
+        // Process messages to include file content for AI processing
+        let processedMessages = messages.map { msg -> ChatMessage in
+            if let fileContent = msg.attachedFileContent, let fileName = msg.attachedFileName {
+                // Include file content in the message content for AI, but keep original structure
+                let enhancedContent = msg.content.isEmpty 
+                    ? "\n\n[File Context: \(fileName)]\n\(fileContent)\n[End of File]"
+                    : "\(msg.content)\n\n[File Context: \(fileName)]\n\(fileContent)\n[End of File]"
+                return ChatMessage(role: msg.role, content: enhancedContent, imageURL: msg.imageURL, imageData: msg.imageData, hasAnimated: msg.hasAnimated, attachedFileName: msg.attachedFileName, attachedFileContent: msg.attachedFileContent)
+            }
+            return msg
         }
         
+        // Se Rovena Cloud estiver ativo, usa chave padrão diretamente
+        // Caso contrário, usa as chaves do usuário
         if model.contains("gemini") {
-            sendGeminiMessage(messages, model: model, completion: completion)
+            sendGeminiMessage(processedMessages, model: model, completion: completion)
         } else {
-            sendOpenAIMessage(messages, model: model, completion: completion)
+            sendOpenAIMessage(processedMessages, model: model, completion: completion)
         }
-    }
-    
-    // MARK: - Rovena Cloud Backend
-    private func sendViaRovenaBackend(_ messages: [ChatMessage], model: String, completion: @escaping (Result<String, Error>) -> Void) {
-        guard let token = AuthManager.shared.idToken else {
-            completion(.failure(NSError(domain: "Rovena", code: 401, userInfo: [NSLocalizedDescriptionKey: "Not authenticated"])))
-            return
-        }
-        
-        let backendURLString = SettingsManager.shared.customEndpoint.isEmpty
-            ? "https://api.rovena.app/api/chat"
-            : SettingsManager.shared.customEndpoint
-        
-        guard let url = URL(string: backendURLString) else {
-            completion(.failure(NSError(domain: "Rovena", code: 0, userInfo: [NSLocalizedDescriptionKey: "Invalid backend URL"])))
-            return
-        }
-        
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
-        
-        let payloadMessages: [[String: Any]] = messages.map { msg in
-            [
-                "role": msg.role.rawValue,
-                "content": msg.content
-            ]
-        }
-        
-        let body: [String: Any] = [
-            "model": model,
-            "messages": payloadMessages
-        ]
-        
-        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-        
-        performRequest(request: request, completion: completion)
     }
     
     private func sendOpenAIMessage(_ messages: [ChatMessage], model: String, completion: @escaping (Result<String, Error>) -> Void) {
-        guard let apiKey = SettingsManager.shared.openAIKey.isEmpty ? nil : SettingsManager.shared.openAIKey else {
-            completion(.failure(NSError(domain: "VeroChat", code: 401, userInfo: [NSLocalizedDescriptionKey: "OpenAI API Key Missing"])))
-            return
+        // Se Rovena Cloud estiver ativo, usa chave padrão; senão, usa chave do usuário
+        let apiKey: String
+        if SettingsManager.shared.useRovenaCloud {
+            let defaultKey = SettingsManager.defaultRovenaAPIKey
+            guard !defaultKey.isEmpty else {
+                completion(.failure(NSError(domain: "Rovena", code: 401, userInfo: [NSLocalizedDescriptionKey: "Rovena Cloud API Key not configured. Please set ROVENA_DEFAULT_API_KEY in Config.plist or environment variable."])))
+                return
+            }
+            apiKey = defaultKey
+            // Verificar limite de tokens antes de fazer requisição quando usar Rovena Cloud
+            let estimatedTokens = estimateTokenCount(messages: messages, model: model)
+            if !TokenService.shared.canUseTokens(estimatedTokens) {
+                let remaining = TokenService.shared.remainingTokens()
+                let used = TokenService.shared.tokensUsedLast30Days
+                let limit = TokenService.shared.monthlyLimit
+                let plan = TokenService.shared.currentPlan
+                
+                let errorMessage = """
+                Token limit exceeded for plan \(plan).
+                
+                Used: \(used.formatted()) / \(limit.formatted()) tokens
+                Remaining: \(remaining.formatted()) tokens
+                
+                Your limit will reset in 30 days from first usage, or upgrade your plan for more tokens.
+                """
+                
+                LogManager.shared.addLog(
+                    "Token limit blocked - Used: \(used)/\(limit), Plan: \(plan)",
+                    level: .warning,
+                    category: "AIService"
+                )
+                
+                completion(.failure(NSError(domain: "Rovena", code: 429, userInfo: [NSLocalizedDescriptionKey: errorMessage])))
+                return
+            }
+        } else {
+            guard let userKey = SettingsManager.shared.openAIKey.isEmpty ? nil : SettingsManager.shared.openAIKey else {
+                completion(.failure(NSError(domain: "VeroChat", code: 401, userInfo: [NSLocalizedDescriptionKey: "OpenAI API Key Missing"])))
+                return
+            }
+            apiKey = userKey
         }
         
         let url = URL(string: "https://api.openai.com/v1/chat/completions")!
@@ -105,9 +114,52 @@ class AIService: ObservableObject {
     }
     
     private func sendGeminiMessage(_ messages: [ChatMessage], model: String, completion: @escaping (Result<String, Error>) -> Void) {
-        guard let apiKey = SettingsManager.shared.geminiKey.isEmpty ? nil : SettingsManager.shared.geminiKey else {
-            completion(.failure(NSError(domain: "VeroChat", code: 401, userInfo: [NSLocalizedDescriptionKey: "Gemini API Key Missing"])))
-            return
+        // Se Rovena Cloud estiver ativo, verificar limite de tokens
+        if SettingsManager.shared.useRovenaCloud {
+            let estimatedTokens = estimateTokenCount(messages: messages, model: model)
+            if !TokenService.shared.canUseTokens(estimatedTokens) {
+                let remaining = TokenService.shared.remainingTokens()
+                let used = TokenService.shared.tokensUsedLast30Days
+                let limit = TokenService.shared.monthlyLimit
+                let plan = TokenService.shared.currentPlan
+                
+                let errorMessage = """
+                Token limit exceeded for plan \(plan).
+                
+                Used: \(used.formatted()) / \(limit.formatted()) tokens
+                Remaining: \(remaining.formatted()) tokens
+                
+                Your limit will reset in 30 days from first usage, or upgrade your plan for more tokens.
+                """
+                
+                LogManager.shared.addLog(
+                    "Token limit blocked (Gemini) - Used: \(used)/\(limit), Plan: \(plan)",
+                    level: .warning,
+                    category: "AIService"
+                )
+                
+                completion(.failure(NSError(domain: "Rovena", code: 429, userInfo: [NSLocalizedDescriptionKey: errorMessage])))
+                return
+            }
+        }
+        
+        // Se Rovena Cloud estiver ativo, usa chave padrão; senão, usa chave do usuário
+        // Nota: Para Gemini, você pode adicionar uma chave padrão também se necessário
+        let apiKey: String
+        if SettingsManager.shared.useRovenaCloud {
+            // Por enquanto, Gemini ainda requer chave do usuário mesmo com Rovena Cloud
+            // Você pode adicionar uma chave padrão do Gemini aqui se quiser
+            guard let userKey = SettingsManager.shared.geminiKey.isEmpty ? nil : SettingsManager.shared.geminiKey else {
+                completion(.failure(NSError(domain: "VeroChat", code: 401, userInfo: [NSLocalizedDescriptionKey: "Gemini API Key Missing"])))
+                return
+            }
+            apiKey = userKey
+        } else {
+            guard let userKey = SettingsManager.shared.geminiKey.isEmpty ? nil : SettingsManager.shared.geminiKey else {
+                completion(.failure(NSError(domain: "VeroChat", code: 401, userInfo: [NSLocalizedDescriptionKey: "Gemini API Key Missing"])))
+                return
+            }
+            apiKey = userKey
         }
         
         let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(model):generateContent?key=\(apiKey)")!
@@ -177,6 +229,12 @@ class AIService: ObservableObject {
                        let parts = content["parts"] as? [[String: Any]],
                        let firstPart = parts.first,
                        let text = firstPart["text"] as? String {
+                        // Registrar uso de tokens se estiver usando Rovena Cloud
+                        if SettingsManager.shared.useRovenaCloud, let strongSelf = self {
+                            // Estimar tokens usados (Gemini não retorna usage no response)
+                            let estimatedTokens = strongSelf.estimateTokenCount(messages: messages, model: model)
+                            TokenService.shared.recordTokenUsage(estimatedTokens)
+                        }
                         completion(.success(text))
                     } else {
                         completion(.failure(NSError(domain: "VeroChat", code: 0, userInfo: [NSLocalizedDescriptionKey: "Invalid Gemini Response structure"])))
@@ -189,8 +247,6 @@ class AIService: ObservableObject {
     }
     
     private func performRequest(request: URLRequest, completion: @escaping (Result<String, Error>) -> Void) {
-        // Removed redundant assignment
-        
         isProcessing = true
         
         URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
@@ -214,6 +270,20 @@ class AIService: ObservableObject {
                    let firstChoice = choices.first,
                    let message = firstChoice["message"] as? [String: Any],
                    let content = message["content"] as? String {
+                    // Registrar uso de tokens se estiver usando Rovena Cloud
+                    if SettingsManager.shared.useRovenaCloud {
+                        TokenService.shared.recordUsageFromAPIResponse(json)
+                        
+                        // Log do uso registrado
+                        if let usage = json["usage"] as? [String: Any],
+                           let totalTokens = usage["total_tokens"] as? Int {
+                            LogManager.shared.addLog(
+                                "Tokens used: \(totalTokens) (Total: \(TokenService.shared.tokensUsedLast30Days)/\(TokenService.shared.monthlyLimit))",
+                                level: .info,
+                                category: "AIService"
+                            )
+                        }
+                    }
                     completion(.success(content))
                 } else {
                      // Try to parse error message
@@ -231,16 +301,78 @@ class AIService: ObservableObject {
         }.resume()
     }
     
-    // Image Generation (DALL-E 3)
-    func generateImage(prompt: String, completion: @escaping (Result<URL, Error>) -> Void) {
-        if SettingsManager.shared.useRovenaCloud {
-            generateImageViaRovenaBackend(prompt: prompt, completion: completion)
-            return
+    // MARK: - Token Estimation
+    
+    /// Estima quantidade de tokens baseado nas mensagens e modelo
+    private func estimateTokenCount(messages: [ChatMessage], model: String) -> Int {
+        // Estimativa simples: ~4 caracteres por token em média
+        let totalChars = messages.reduce(0) { $0 + $1.content.count }
+        let estimated = totalChars / 4
+        
+        // Ajuste baseado no modelo (modelos maiores tendem a usar mais tokens)
+        if model.contains("gpt-4") {
+            return Int(Double(estimated) * 1.2) // GPT-4 tende a usar mais tokens
         }
         
-        guard let apiKey = SettingsManager.shared.openAIKey.isEmpty ? nil : SettingsManager.shared.openAIKey else {
-             completion(.failure(NSError(domain: "VeroChat", code: 401, userInfo: [NSLocalizedDescriptionKey: "OpenAI API Key Missing"])))
-             return
+        return estimated
+    }
+    
+    // Image Generation (DALL-E 3)
+    func generateImage(prompt: String, completion: @escaping (Result<URL, Error>) -> Void) {
+        // Custo de geração de imagem em tokens
+        let imageGenerationCost = 1000
+        
+        // Verificar limite de tokens antes de gerar imagem quando usar Rovena Cloud
+        if SettingsManager.shared.useRovenaCloud {
+            if !TokenService.shared.canUseTokens(imageGenerationCost) {
+                let remaining = TokenService.shared.remainingTokens()
+                let used = TokenService.shared.tokensUsedLast30Days
+                let limit = TokenService.shared.monthlyLimit
+                let plan = TokenService.shared.currentPlan
+                
+                let errorMessage = """
+                Token limit exceeded for plan \(plan).
+                
+                Used: \(used.formatted()) / \(limit.formatted()) tokens
+                Remaining: \(remaining.formatted()) tokens
+                
+                Image generation costs \(imageGenerationCost) tokens. Your limit will reset in 30 days from first usage, or upgrade your plan for more tokens.
+                """
+                
+                LogManager.shared.addLog(
+                    "Token limit blocked (Image) - Used: \(used)/\(limit), Plan: \(plan)",
+                    level: .warning,
+                    category: "AIService"
+                )
+                
+                completion(.failure(NSError(domain: "Rovena", code: 429, userInfo: [NSLocalizedDescriptionKey: errorMessage])))
+                return
+            }
+        }
+        
+        // Se Rovena Cloud estiver ativo, usa chave padrão; senão, usa chave do usuário
+        let apiKey: String
+        if SettingsManager.shared.useRovenaCloud {
+            let defaultKey = SettingsManager.defaultRovenaAPIKey
+            guard !defaultKey.isEmpty else {
+                completion(.failure(NSError(domain: "Rovena", code: 401, userInfo: [NSLocalizedDescriptionKey: "Rovena Cloud API Key not configured. Please set ROVENA_DEFAULT_API_KEY in Config.plist or environment variable."])))
+                return
+            }
+            apiKey = defaultKey
+            // Verificar limite de tokens antes de gerar imagem
+            if !TokenService.shared.canUseTokens(imageGenerationCost) {
+                let remaining = TokenService.shared.remainingTokens()
+                let used = TokenService.shared.tokensUsedLast30Days
+                let limit = TokenService.shared.monthlyLimit
+                completion(.failure(NSError(domain: "Rovena", code: 429, userInfo: [NSLocalizedDescriptionKey: "Token limit exceeded. Used \(used)/\(limit) tokens. Remaining: \(remaining)"])))
+                return
+            }
+        } else {
+            guard let userKey = SettingsManager.shared.openAIKey.isEmpty ? nil : SettingsManager.shared.openAIKey else {
+                completion(.failure(NSError(domain: "VeroChat", code: 401, userInfo: [NSLocalizedDescriptionKey: "OpenAI API Key Missing"])))
+                return
+            }
+            apiKey = userKey
         }
         
         let url = URL(string: "https://api.openai.com/v1/images/generations")!
@@ -281,6 +413,10 @@ class AIService: ObservableObject {
                    let first = dataArray.first,
                    let urlString = first["url"] as? String,
                    let url = URL(string: urlString) {
+                    // Registrar uso de tokens se estiver usando Rovena Cloud
+                    if SettingsManager.shared.useRovenaCloud {
+                        TokenService.shared.recordTokenUsage(imageGenerationCost)
+                    }
                     completion(.success(url))
                 } else {
                     if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -297,60 +433,4 @@ class AIService: ObservableObject {
         }.resume()
     }
     
-    private func generateImageViaRovenaBackend(prompt: String, completion: @escaping (Result<URL, Error>) -> Void) {
-        guard let token = AuthManager.shared.idToken else {
-            completion(.failure(NSError(domain: "Rovena", code: 401, userInfo: [NSLocalizedDescriptionKey: "Not authenticated"])))
-            return
-        }
-        
-        let backendURLString = SettingsManager.shared.customEndpoint.isEmpty
-            ? "https://api.rovena.app/api/image"
-            : SettingsManager.shared.customEndpoint
-        
-        guard let url = URL(string: backendURLString) else {
-            completion(.failure(NSError(domain: "Rovena", code: 0, userInfo: [NSLocalizedDescriptionKey: "Invalid backend URL"])))
-            return
-        }
-        
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
-        
-        let body: [String: Any] = [
-            "prompt": prompt
-        ]
-        
-        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-        
-        isProcessing = true
-        
-        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
-            DispatchQueue.main.async {
-                self?.isProcessing = false
-            }
-            
-            if let error = error {
-                completion(.failure(error))
-                return
-            }
-            
-            guard let data = data else {
-                completion(.failure(NSError(domain: "Rovena", code: 0, userInfo: [NSLocalizedDescriptionKey: "No Data"])))
-                return
-            }
-            
-            do {
-                if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                   let urlString = json["url"] as? String,
-                   let url = URL(string: urlString) {
-                    completion(.success(url))
-                } else {
-                    completion(.failure(NSError(domain: "Rovena", code: 0, userInfo: [NSLocalizedDescriptionKey: "Invalid Image Response"])))
-                }
-            } catch {
-                completion(.failure(error))
-            }
-        }.resume()
-    }
 }

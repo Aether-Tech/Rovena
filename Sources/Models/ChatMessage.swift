@@ -8,6 +8,8 @@ struct ChatMessage: Identifiable, Codable {
     let imageData: Data? // For user uploaded images (local)
     let timestamp: Date
     var hasAnimated: Bool = false
+    let attachedFileName: String? // Name of attached file (for display)
+    let attachedFileContent: String? // Content of attached file (for AI processing)
     
     enum Role: String, Codable {
         case user
@@ -15,7 +17,7 @@ struct ChatMessage: Identifiable, Codable {
         case system
     }
     
-    init(role: Role, content: String, imageURL: URL? = nil, imageData: Data? = nil, hasAnimated: Bool = false) {
+    init(role: Role, content: String, imageURL: URL? = nil, imageData: Data? = nil, hasAnimated: Bool = false, attachedFileName: String? = nil, attachedFileContent: String? = nil) {
         self.id = UUID()
         self.role = role
         self.content = content
@@ -23,5 +25,7 @@ struct ChatMessage: Identifiable, Codable {
         self.imageData = imageData
         self.timestamp = Date()
         self.hasAnimated = hasAnimated
+        self.attachedFileName = attachedFileName
+        self.attachedFileContent = attachedFileContent
     }
 }

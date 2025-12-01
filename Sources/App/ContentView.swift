@@ -5,6 +5,7 @@ enum NavigationItem: String, CaseIterable, Identifiable {
     case chat = "Chat"
     case history = "Archives"
     case canvas = "Canvas"
+    case charts = "Charts"
     case presentations = "Presentations"
     case settings = "Settings"
     
@@ -16,7 +17,8 @@ enum NavigationItem: String, CaseIterable, Identifiable {
         case .chat: return "message"
         case .history: return "clock"
         case .canvas: return "scribble"
-        case .presentations: return "chart.pie"
+        case .charts: return "chart.bar.fill"
+        case .presentations: return "doc.text.fill"
         case .settings: return "gearshape"
         }
     }
@@ -28,6 +30,8 @@ struct ContentView: View {
     @State private var activeSessionId: UUID?
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @ObservedObject var historyService = HistoryService.shared
+    @ObservedObject var tokenService = TokenService.shared
+    @Environment(\.scenePhase) private var scenePhase
     
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
@@ -51,12 +55,7 @@ struct ContentView: View {
                 List(selection: $selection) {
                     ForEach(NavigationItem.allCases) { item in
                         NavigationLink(value: item) {
-                            HStack {
-                                Image(systemName: item.icon)
-                                Text(item.rawValue)
-                                    .font(DesignSystem.font(size: 13))
-                            }
-                            .padding(.vertical, 4)
+                            navigationItemView(item)
                         }
                     }
                 }
@@ -79,8 +78,10 @@ struct ContentView: View {
                     HistoryView(selection: $selection, activeSessionId: $activeSessionId)
                 case .canvas:
                     CanvasView()
+                case .charts:
+                    ChartsView()
                 case .presentations:
-                    PresentationView()
+                    PresentationMainView()
                 case .settings:
                     SettingsView()
                 case .none:
@@ -90,10 +91,94 @@ struct ContentView: View {
                 }
             }
         }
+        .onChange(of: scenePhase) { oldPhase, newPhase in
+            // Quando app volta ao foreground (usuário volta do Stripe), verificar assinatura
+            if oldPhase != .active && newPhase == .active {
+                if settings.useRovenaCloud {
+                    tokenService.syncWithStripe(force: true)
+                }
+            }
+        }
+        .onAppear {
+            // Verificar assinatura quando app abre
+            if settings.useRovenaCloud {
+                tokenService.syncWithStripe(force: false)
+            }
+        }
+        .overlay(alignment: .top) {
+            // Toast notification quando plano muda
+            if let notification = tokenService.planChangedNotification {
+                ToastView(message: notification.message)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .onAppear {
+                        // Auto-dismiss após 4 segundos
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
+                            withAnimation {
+                                tokenService.planChangedNotification = nil
+                            }
+                        }
+                    }
+            }
+        }
     }
     
     private var activeSession: ChatSession? {
         guard let id = activeSessionId else { return nil }
         return historyService.sessions.first(where: { $0.id == id })
+    }
+    
+    @ViewBuilder
+    private func navigationItemView(_ item: NavigationItem) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: item.icon)
+            
+            // Para Presentations, mostrar "Presentations" + badge BETA
+            if item == .presentations {
+                Text("Presentations")
+                    .font(DesignSystem.font(size: 13))
+                
+                Text("BETA")
+                    .font(DesignSystem.font(size: 9, weight: .bold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.blue)
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+            } else {
+                Text(item.rawValue)
+                    .font(DesignSystem.font(size: 13))
+            }
+            
+            Spacer()
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+// MARK: - Toast View
+
+struct ToastView: View {
+    let message: String
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundColor(.green)
+            
+            Text(message)
+                .font(DesignSystem.font(size: 13, weight: .medium))
+                .foregroundColor(DesignSystem.text)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
+        .background(DesignSystem.surface)
+        .clipShape(SquircleShape())
+        .overlay(
+            SquircleShape()
+                .stroke(DesignSystem.border.opacity(0.3), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.2), radius: 8, x: 0, y: 4)
+        .padding(.top, 20)
+        .padding(.horizontal, 20)
     }
 }

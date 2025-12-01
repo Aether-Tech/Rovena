@@ -86,7 +86,11 @@ class HistoryService: ObservableObject {
         // Update name if it's the first user message and name is generic
         if session.messages.filter({ $0.role == .user }).count == 1,
            message.role == .user {
-            session.name = String(message.content.prefix(30))
+            if !message.content.isEmpty {
+                session.name = String(message.content.prefix(30))
+            } else if let fileName = message.attachedFileName {
+                session.name = "File: \(fileName)"
+            }
         }
         
         sessions[index] = session
