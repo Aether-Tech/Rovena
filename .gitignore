@@ -47,3 +47,6 @@ canvas_elements.json
 # Scripts (keep them)
 # *.sh files are tracked
 
+
+# Backend dependencies
+backend/node_modules/
