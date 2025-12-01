@@ -11,10 +11,9 @@ DerivedData/
 
 # App Bundle (generated)
 *.app
-!Rovena.app
 
-# DMG (keep the installer)
-# Rovena-Installer.dmg is tracked
+# DMG (generated)
+*.dmg
 
 # Icon generation temp files
 *.iconset
@@ -43,10 +42,30 @@ canvas_elements.json
 
 # Environment variables (contém chaves secretas)
 .env
-
-# Scripts (keep them)
-# *.sh files are tracked
-
+.env.local
 
 # Backend dependencies
 backend/node_modules/
+backend/package-lock.json
+
+# Release scripts e documentação local
+*.sh
+*.md
+!README.md
+appcast.xml
+generate_appcast.sh
+make_release.sh
+COMO_*.md
+CONFIGURAR_*.md
+SETUP_*.md
+UPDATE_*.md
+ENTENDENDO_*.md
+LAUNCH_*.md
+PRICING_*.md
+RELEASE_*.md
+SOLUCAO_*.md
+CONFIGURACAO_*.md
+backend/TOKEN_SYSTEM.md
+
+# GitHub workflows (manter apenas o essencial se necessário)
+# .github/workflows/release.yml pode ser mantido se for usado pelo CI/CD
