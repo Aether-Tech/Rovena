@@ -514,6 +514,9 @@ struct SettingsView: View {
                                     Text(updateService.fullVersion)
                                         .font(DesignSystem.font(size: 14, weight: .medium))
                                         .foregroundColor(DesignSystem.text)
+                                    Text("Updates are delivered via GitHub releases (Sparkle)")
+                                        .font(DesignSystem.font(size: 10))
+                                        .foregroundColor(DesignSystem.text.opacity(0.5))
                                 }
                                 
                                 Spacer()
