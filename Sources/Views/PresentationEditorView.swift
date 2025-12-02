@@ -1,4 +1,6 @@
 import SwiftUI
+import AppKit
+import PDFKit
 
 struct PresentationEditorView: View {
     @Binding var presentation: EditablePresentation
@@ -216,6 +218,50 @@ struct PresentationEditorView: View {
     private func savePresentation() {
         presentation.updatedAt = Date()
         onSave(presentation)
+        exportAsPDF()
+    }
+    
+    private func exportAsPDF() {
+        let savePanel = NSSavePanel()
+        savePanel.allowedContentTypes = [.pdf]
+        savePanel.nameFieldStringValue = "\(presentation.title).pdf"
+        
+        savePanel.begin { response in
+            guard response == .OK, let url = savePanel.url else { return }
+            
+            let pdfDocument = PDFDocument()
+            
+            for (index, slide) in presentation.slides.enumerated() {
+                // Criar uma view SwiftUI para o slide atual
+                let slideView = SlideCanvasView(
+                    slide: .constant(slide),
+                    selectedElementId: .constant(nil),
+                    onRegenerateImage: { _ in }
+                )
+                .frame(width: 1280 * 0.6 + 80, height: 720 * 0.6 + 80)
+                
+                let hostingView = NSHostingView(rootView: slideView)
+                hostingView.frame = CGRect(x: 0, y: 0, width: hostingView.fittingSize.width, height: hostingView.fittingSize.height)
+                hostingView.layoutSubtreeIfNeeded()
+                
+                let pdfData = hostingView.dataWithPDF(inside: hostingView.bounds)
+                if let tempPDF = PDFDocument(data: pdfData), tempPDF.pageCount > 0 {
+                    if let page = tempPDF.page(at: 0) {
+                        pdfDocument.insert(page, at: pdfDocument.pageCount)
+                    }
+                } else {
+                    print("Failed to create PDF page for slide \(index)")
+                }
+            }
+            
+            do {
+                if let data = pdfDocument.dataRepresentation() {
+                    try data.write(to: url)
+                }
+            } catch {
+                print("Failed to write PDF: \(error)")
+            }
+        }
     }
 }
 
@@ -241,7 +287,7 @@ struct SlideThumbnail: View {
                         .padding(4)
                 )
             
-            Text("Slide \(slide.id.uuidString.prefix(8))")
+            Text("Slide \\(String(slide.id.uuidString.prefix(8)))")
                 .font(DesignSystem.font(size: 10))
                 .foregroundColor(DesignSystem.text.opacity(0.6))
         }
