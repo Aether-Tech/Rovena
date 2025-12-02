@@ -3,8 +3,8 @@ name: Build and Release
 on:
   push:
     tags:
-      - 'v*'  # Roda quando você cria uma tag v1.0.0, v1.0.1, etc.
-  workflow_dispatch:  # Permite rodar manualmente pelo botão "Run workflow"
+      - 'v*'           # Roda em tags tipo v1.0.0, v1.0.1...
+  workflow_dispatch:   # Permite rodar manualmente no botão "Run workflow"
 
 jobs:
   build:
@@ -22,7 +22,6 @@ jobs:
         with:
           swift-version: "5.9"
 
-      # Lê a versão da tag vX.Y.Z e coloca em $VERSION para os próximos steps
       - name: Set version from tag
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV
 
@@ -79,22 +78,14 @@ jobs:
           </plist>
           EOF
 
-      # Opcional: só roda se você configurar o certificado nos secrets.
-      # Hoje ele só faz um echo, então pode deixar assim.
-      - name: Code sign (if certificate available)
-        if: ${{ secrets.MACOS_CERTIFICATE_BASE64 != '' }}
-        run: |
-          echo "⚠️  Code signing step would run here if you configure certificates."
-
       - name: Create DMG
         run: |
-          # Tenta instalar create-dmg (se não tiver). Se falhar, usa hdiutil direto.
           if ! command -v create-dmg &> /dev/null; then
             brew install create-dmg || echo "create-dmg not available, using hdiutil only"
           fi
 
           hdiutil create -volname "${APP_NAME}" -srcfolder "${APP_NAME}.app" -ov -format UDZO "Rovena-${VERSION}.dmg" \
-            || echo "DMG creation failed, workflow will continuar mesmo assim"
+            || echo "DMG creation failed, workflow vai continuar mesmo assim"
 
       - name: Generate appcast
         run: |
