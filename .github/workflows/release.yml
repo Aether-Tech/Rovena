@@ -3,46 +3,52 @@ name: Build and Release
 on:
   push:
     tags:
-      - 'v*'  # Trigger quando uma tag v* é criada (ex: v1.0.0)
-  workflow_dispatch:  # Permite trigger manual
+      - 'v*'  # Roda quando você cria uma tag v1.0.0, v1.0.1, etc.
+  workflow_dispatch:  # Permite rodar manualmente pelo botão "Run workflow"
 
 jobs:
   build:
     runs-on: macos-14
-    
+
+    env:
+      APP_NAME: Rovena
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
+
       - name: Setup Swift
         uses: swift-actions/setup-swift@v1
         with:
           swift-version: "5.9"
-      
+
+      # Lê a versão da tag vX.Y.Z e coloca em $VERSION para os próximos steps
+      - name: Set version from tag
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV
+
       - name: Build app
         run: |
           swift build -c release
-          mkdir -p Rovena.app/Contents/MacOS
-          mkdir -p Rovena.app/Contents/Resources
-          cp .build/release/Rovena Rovena.app/Contents/MacOS/
-          chmod +x Rovena.app/Contents/MacOS/Rovena
-      
+          mkdir -p "${APP_NAME}.app/Contents/MacOS"
+          mkdir -p "${APP_NAME}.app/Contents/Resources"
+          cp .build/release/Rovena "${APP_NAME}.app/Contents/MacOS/"
+          chmod +x "${APP_NAME}.app/Contents/MacOS/Rovena"
+
       - name: Copy resources
         run: |
           if [ -f "Sources/App/GoogleService-Info.plist" ]; then
-            cp Sources/App/GoogleService-Info.plist Rovena.app/Contents/Resources/
+            cp Sources/App/GoogleService-Info.plist "${APP_NAME}.app/Contents/Resources/"
           fi
           if [ -f "Sources/Config.plist" ]; then
-            cp Sources/Config.plist Rovena.app/Contents/Resources/
+            cp Sources/Config.plist "${APP_NAME}.app/Contents/Resources/"
           fi
           if [ -f "Sources/Documents/TermsAndConditions.md" ]; then
-            cp Sources/Documents/TermsAndConditions.md Rovena.app/Contents/Resources/
+            cp Sources/Documents/TermsAndConditions.md "${APP_NAME}.app/Contents/Resources/"
           fi
-      
+
       - name: Create Info.plist
         run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
-          cat > Rovena.app/Contents/Info.plist <<EOF
+          cat > "${APP_NAME}.app/Contents/Info.plist" <<EOF
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
@@ -72,44 +78,36 @@ jobs:
           </dict>
           </plist>
           EOF
-      
+
+      # Opcional: só roda se você configurar o certificado nos secrets.
+      # Hoje ele só faz um echo, então pode deixar assim.
       - name: Code sign (if certificate available)
         if: ${{ secrets.MACOS_CERTIFICATE_BASE64 != '' }}
         run: |
-          # Descomente se tiver certificado de desenvolvedor
-          # echo "${{ secrets.MACOS_CERTIFICATE_BASE64 }}" | base64 --decode > certificate.p12
-          # security create-keychain -p "" build.keychain
-          # security default-keychain -s build.keychain
-          # security unlock-keychain -p "" build.keychain
-          # security import certificate.p12 -k build.keychain -P "${{ secrets.MACOS_CERTIFICATE_PASSWORD }}" -T /usr/bin/codesign
-          # security set-key-partition-list -S apple-tool:,apple: -s -k "" build.keychain
-          # codesign --force --sign "Developer ID Application: ..." --entitlements Rovena.entitlements --deep Rovena.app
-          echo "⚠️  Code signing skipped (configure certificates in secrets)"
-      
+          echo "⚠️  Code signing step would run here if you configure certificates."
+
       - name: Create DMG
         run: |
-          # Instalar create-dmg se necessário
+          # Tenta instalar create-dmg (se não tiver). Se falhar, usa hdiutil direto.
           if ! command -v create-dmg &> /dev/null; then
-            brew install create-dmg || echo "create-dmg not available, skipping DMG creation"
+            brew install create-dmg || echo "create-dmg not available, using hdiutil only"
           fi
-          
-          # Criar DMG básico
-          hdiutil create -volname "Rovena" -srcfolder Rovena.app -ov -format UDZO "Rovena-${VERSION}.dmg" || echo "DMG creation failed, will upload app bundle"
-      
+
+          hdiutil create -volname "${APP_NAME}" -srcfolder "${APP_NAME}.app" -ov -format UDZO "Rovena-${VERSION}.dmg" \
+            || echo "DMG creation failed, workflow will continuar mesmo assim"
+
       - name: Generate appcast
         run: |
           chmod +x generate_appcast.sh
-          ./generate_appcast.sh || echo "Appcast generation skipped"
-      
+          ./generate_appcast.sh || echo "Appcast generation skipped (verifique generate_appcast.sh)"
+
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
           files: |
             Rovena-*.dmg
-            Rovena.app.zip
             appcast.xml
           draft: false
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
