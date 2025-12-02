@@ -1,4 +1,14 @@
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
+
+enum ResizeHandle {
+    case topLeft
+    case topRight
+    case bottomLeft
+    case bottomRight
+}
 
 struct SlideCanvasView: View {
     @Binding var slide: EditableSlide
@@ -58,11 +68,17 @@ struct SlideCanvasView: View {
                         onDrag: { offset in
                             updateElementPosition(elementId: editableElement.id, offset: offset)
                         },
-                        onResize: { newSize in
-                            updateElementSize(elementId: editableElement.id, newSize: newSize)
+                        onResize: { handle, translation in
+                            resizeElement(elementId: editableElement.id, handle: handle, translation: translation)
+                        },
+                        onResizeEnd: {
+                            endResizing()
                         },
                         onRegenerateImage: {
                             onRegenerateImage(editableElement)
+                        },
+                        onRotate: {
+                            rotateElement(elementId: editableElement.id)
                         }
                     )
                 }
@@ -81,12 +97,59 @@ struct SlideCanvasView: View {
         slide.elements[index].position = CodablePoint(CGPoint(x: newX, y: newY))
     }
     
-    private func updateElementSize(elementId: UUID, newSize: CGSize) {
+    private func resizeElement(elementId: UUID, handle: ResizeHandle, translation: CGSize) {
         guard let index = slide.elements.firstIndex(where: { $0.id == elementId }) else { return }
+        
+        // Inicializar estado de resize no começo do gesto
+        if resizingElementId != elementId {
+            resizingElementId = elementId
+            resizeStartSize = slide.elements[index].size.cgSize
+            resizeStartPosition = slide.elements[index].position.cgPoint
+        }
+        
+        let dx = translation.width / scale
+        let dy = translation.height / scale
         let minSize: CGFloat = 50
-        let constrainedWidth = max(minSize, min(canvasWidth, newSize.width / scale))
-        let constrainedHeight = max(minSize, min(canvasHeight, newSize.height / scale))
-        slide.elements[index].size = CodableSize(CGSize(width: constrainedWidth, height: constrainedHeight))
+        
+        var newSize = resizeStartSize
+        var newPosition = resizeStartPosition
+        
+        switch handle {
+        case .topLeft:
+            newPosition.x = resizeStartPosition.x + dx
+            newPosition.y = resizeStartPosition.y + dy
+            newSize.width = resizeStartSize.width - dx
+            newSize.height = resizeStartSize.height - dy
+        case .topRight:
+            newPosition.y = resizeStartPosition.y + dy
+            newSize.width = resizeStartSize.width + dx
+            newSize.height = resizeStartSize.height - dy
+        case .bottomLeft:
+            newPosition.x = resizeStartPosition.x + dx
+            newSize.width = resizeStartSize.width - dx
+            newSize.height = resizeStartSize.height + dy
+        case .bottomRight:
+            newSize.width = resizeStartSize.width + dx
+            newSize.height = resizeStartSize.height + dy
+        }
+        
+        // Garantir tamanho mínimo
+        newSize.width = max(minSize, newSize.width)
+        newSize.height = max(minSize, newSize.height)
+        
+        slide.elements[index].position = CodablePoint(CGPoint(x: newPosition.x, y: newPosition.y))
+        slide.elements[index].size = CodableSize(newSize)
+    }
+    
+    private func endResizing() {
+        resizingElementId = nil
+    }
+    
+    private func rotateElement(elementId: UUID) {
+        guard let index = slide.elements.firstIndex(where: { $0.id == elementId }) else { return }
+        let currentRotation = slide.elements[index].rotation ?? 0
+        let newRotation = (currentRotation + 90).truncatingRemainder(dividingBy: 360)
+        slide.elements[index].rotation = newRotation
     }
 }
 
@@ -99,13 +162,13 @@ struct SlideElementView: View {
     let onSingleTap: () -> Void
     let onDoubleTap: () -> Void
     let onDrag: (CGSize) -> Void
-    let onResize: (CGSize) -> Void
+    let onResize: (ResizeHandle, CGSize) -> Void
+    let onResizeEnd: () -> Void
     let onRegenerateImage: () -> Void
+    let onRotate: () -> Void
     
     @State private var isDragging = false
     @State private var dragOffset: CGSize = .zero
-    @State private var isResizing = false
-    @State private var resizeOffset: CGSize = .zero
     @State private var isEditing = false
     @State private var editedText: String = ""
     @State private var lastTapTime: Date = Date()
@@ -121,46 +184,55 @@ struct SlideElementView: View {
                 textElementView
             case .image:
                 imageElementView
+                    .frame(
+                        width: element.size.cgSize.width * scale,
+                        height: element.size.cgSize.height * scale
+                    )
             }
         }
-        .frame(
-            width: element.size.cgSize.width * scale,
-            height: element.size.cgSize.height * scale
-        )
+        .clipped() // Garantir que o conteúdo seja cortado no frame
+        .rotationEffect(.degrees(element.rotation ?? 0))
         .offset(
             x: element.position.cgPoint.x * scale,
             y: element.position.cgPoint.y * scale
         )
+        .onChange(of: isSelected) { oldValue, newValue in
+            if !newValue && isEditing {
+                finishEditing()
+            }
+        }
     }
     
     private var textElementView: some View {
         Group {
             if isEditing {
-                TextField("", text: $editedText, axis: .vertical)
-                    .textFieldStyle(.plain)
+                TextEditor(text: $editedText)
                     .font(fontForElement)
                     .foregroundColor(colorForElement)
-                    .multilineTextAlignment(.leading)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .padding(8)
                     .background(Color.white.opacity(0.1))
-                    .onSubmit {
-                        finishEditing()
-                    }
                     .onAppear {
                         editedText = element.content
                     }
+                    .onChange(of: editedText) { oldValue, newValue in
+                        element.content = newValue
+                    }
+                    .background(textSizeReader)
             } else {
                 Text(element.content)
                     .font(fontForElement)
                     .foregroundColor(colorForElement)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .shadow(color: .white.opacity(0.8), radius: 2, x: 0, y: 0) // Sombra branca para destacar em fundos escuros
+                    .shadow(color: .black.opacity(0.3), radius: 1, x: 0, y: 1) // Sombra preta para destacar em fundos claros
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
                     .padding(8)
                     .contentShape(Rectangle())
                     .onTapGesture(count: 2) {
                         // Duplo clique: editar
                         onDoubleTap()
                         isEditing = true
+                        editedText = element.content
                     }
                     .highPriorityGesture(
                         TapGesture()
@@ -173,6 +245,7 @@ struct SlideElementView: View {
                                 }
                             }
                     )
+                    .background(textSizeReader)
             }
         }
         .overlay(
@@ -183,7 +256,7 @@ struct SlideElementView: View {
             }
         )
         .gesture(
-            DragGesture(minimumDistance: 5)
+            DragGesture(minimumDistance: 8) // Aumentar distância mínima para evitar drag acidental
                 .onChanged { value in
                     if !isDragging {
                         isDragging = true
@@ -218,33 +291,38 @@ struct SlideElementView: View {
     }
     
     private var imageElementView: some View {
-        Group {
-            if let image = loadedImage {
-                Image(nsImage: image)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .clipped()
-            } else if isLoadingImage {
-                ProgressView()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if imageLoadError {
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(DesignSystem.surface)
-                    .overlay(
-                        Image(systemName: "photo")
-                            .foregroundColor(DesignSystem.text.opacity(0.3))
-                    )
-            } else {
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(DesignSystem.surface)
-                    .overlay(
-                        Image(systemName: "photo")
-                            .foregroundColor(DesignSystem.text.opacity(0.3))
-                    )
+        GeometryReader { geometry in
+            Group {
+                if let image = loadedImage {
+                    Image(nsImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                        .clipped()
+                } else if isLoadingImage {
+                    ProgressView()
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                } else if imageLoadError {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(DesignSystem.surface)
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                        .overlay(
+                            Image(systemName: "photo")
+                                .foregroundColor(DesignSystem.text.opacity(0.3))
+                        )
+                } else {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(DesignSystem.surface)
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                        .overlay(
+                            Image(systemName: "photo")
+                                .foregroundColor(DesignSystem.text.opacity(0.3))
+                        )
+                }
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(width: element.size.cgSize.width * scale, height: element.size.cgSize.height * scale)
+        .contentShape(Rectangle())
         .onAppear {
             loadImageAsync()
         }
@@ -267,7 +345,7 @@ struct SlideElementView: View {
             onSingleTap()
         }
         .gesture(
-            DragGesture(minimumDistance: 5)
+            DragGesture(minimumDistance: 8) // Aumentar distância mínima para evitar drag acidental
                 .onChanged { value in
                     if !isDragging {
                         isDragging = true
@@ -313,7 +391,7 @@ struct SlideElementView: View {
         }
         
         // Se já carregou e a URL não mudou, não recarregar
-        if let existingImage = loadedImage, !imageLoadError {
+        if loadedImage != nil && !imageLoadError {
             return
         }
         
@@ -358,12 +436,13 @@ struct SlideElementView: View {
                 resizeHandles
             }
             
-            // Regenerate button for images
+            // Action buttons for images
             if element.type == .image {
                 VStack {
                     HStack {
                         Spacer()
-                        Button(action: onRegenerateImage) {
+                        // Rotate button
+                        Button(action: onRotate) {
                             Image(systemName: "arrow.clockwise")
                                 .font(.system(size: 12))
                                 .foregroundColor(.white)
@@ -372,6 +451,19 @@ struct SlideElementView: View {
                                 .clipShape(Circle())
                         }
                         .buttonStyle(.plain)
+                        .help("Rotate image")
+                        
+                        // Regenerate button
+                        Button(action: onRegenerateImage) {
+                            Image(systemName: "sparkles")
+                                .font(.system(size: 12))
+                                .foregroundColor(.white)
+                                .padding(6)
+                                .background(Color.orange)
+                                .clipShape(Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .help("Regenerate image")
                     }
                     Spacer()
                 }
@@ -381,21 +473,117 @@ struct SlideElementView: View {
     }
     
     private var resizeHandles: some View {
-        Group {
-            // Corner resize handle
+        let handleSize: CGFloat = 16
+        let minDragDistance: CGFloat = 5
+        let elementWidth = element.size.cgSize.width * scale
+        let elementHeight = element.size.cgSize.height * scale
+        
+        func handleCursor() -> some ViewModifier {
+            // Helper vazio para iOS; cursor só em macOS
+            struct EmptyMod: ViewModifier {
+                func body(content: Content) -> some View { content }
+            }
+            #if os(macOS)
+            struct CursorMod: ViewModifier {
+                let cursor: NSCursor
+                func body(content: Content) -> some View {
+                    content.onHover { hovering in
+                        if hovering {
+                            cursor.set()
+                        } else {
+                            NSCursor.arrow.set()
+                        }
+                    }
+                }
+            }
+            return CursorMod(cursor: NSCursor.crosshair)
+            #else
+            return EmptyMod()
+            #endif
+        }
+        
+        return ZStack {
+            // Handle canto superior esquerdo
             Circle()
                 .fill(DesignSystem.accent)
-                .frame(width: 12, height: 12)
-                .position(x: element.size.cgSize.width * scale, y: element.size.cgSize.height * scale)
+                .frame(width: handleSize, height: handleSize)
+                .overlay(
+                    Circle()
+                        .stroke(Color.white, lineWidth: 2)
+                )
+                .position(x: 0, y: 0)
+                .modifier(handleCursor())
                 .gesture(
-                    DragGesture()
+                    DragGesture(minimumDistance: minDragDistance)
                         .onChanged { value in
-                            let newWidth = element.size.cgSize.width + value.translation.width / scale
-                            let newHeight = element.size.cgSize.height + value.translation.height / scale
-                            onResize(CGSize(width: newWidth, height: newHeight))
+                            onResize(.topLeft, value.translation)
+                        }
+                        .onEnded { _ in
+                            onResizeEnd()
+                        }
+                )
+            
+            // Handle canto superior direito
+            Circle()
+                .fill(DesignSystem.accent)
+                .frame(width: handleSize, height: handleSize)
+                .overlay(
+                    Circle()
+                        .stroke(Color.white, lineWidth: 2)
+                )
+                .position(x: elementWidth, y: 0)
+                .modifier(handleCursor())
+                .gesture(
+                    DragGesture(minimumDistance: minDragDistance)
+                        .onChanged { value in
+                            onResize(.topRight, value.translation)
+                        }
+                        .onEnded { _ in
+                            onResizeEnd()
+                        }
+                )
+            
+            // Handle canto inferior esquerdo
+            Circle()
+                .fill(DesignSystem.accent)
+                .frame(width: handleSize, height: handleSize)
+                .overlay(
+                    Circle()
+                        .stroke(Color.white, lineWidth: 2)
+                )
+                .position(x: 0, y: elementHeight)
+                .modifier(handleCursor())
+                .gesture(
+                    DragGesture(minimumDistance: minDragDistance)
+                        .onChanged { value in
+                            onResize(.bottomLeft, value.translation)
+                        }
+                        .onEnded { _ in
+                            onResizeEnd()
+                        }
+                )
+            
+            // Handle canto inferior direito
+            Circle()
+                .fill(DesignSystem.accent)
+                .frame(width: handleSize, height: handleSize)
+                .overlay(
+                    Circle()
+                        .stroke(Color.white, lineWidth: 2)
+                )
+                .position(x: elementWidth, y: elementHeight)
+                .modifier(handleCursor())
+                .gesture(
+                    DragGesture(minimumDistance: minDragDistance)
+                        .onChanged { value in
+                            onResize(.bottomRight, value.translation)
+                        }
+                        .onEnded { _ in
+                            onResizeEnd()
                         }
                 )
         }
+        .frame(width: elementWidth, height: elementHeight)
     }
     
     private var fontForElement: Font {
@@ -406,10 +594,50 @@ struct SlideElementView: View {
     }
     
     private var colorForElement: Color {
+        // Se o elemento tem uma cor definida, usar ela
         if let colorHex = element.color {
-            return Color(hex: colorHex) ?? DesignSystem.text
+            return Color(hex: colorHex) ?? getContrastingTextColor()
         }
-        return DesignSystem.text
+        
+        // Caso contrário, usar cor que contrasta com o fundo
+        return getContrastingTextColor()
+    }
+    
+    private func getContrastingTextColor() -> Color {
+        // Por padrão, o canvas tem fundo branco, então usar texto escuro
+        // Se houver imagem de fundo ou fundo escuro, usar texto claro
+        // Por enquanto, vamos usar uma cor escura que funciona bem em fundos claros
+        // e adicionar sombra para funcionar em qualquer fundo
+        
+        // Cor escura com boa legibilidade
+        return Color(red: 0.1, green: 0.1, blue: 0.15) // Quase preto com leve tom azul
+    }
+    
+    private var textSizeReader: some View {
+        GeometryReader { geo in
+            Color.clear
+                .onAppear {
+                    updateTextSizeIfNeeded(geo.size)
+                }
+                .onChange(of: geo.size) { oldValue, newValue in
+                    updateTextSizeIfNeeded(newValue)
+                }
+        }
+    }
+    
+    private func updateTextSizeIfNeeded(_ size: CGSize) {
+        // Converter tamanho da view (já escalada) para coordenadas do canvas
+        let contentWidth = size.width / scale
+        let contentHeight = size.height / scale
+        let minWidth: CGFloat = 50
+        let minHeight: CGFloat = 30
+        let newWidth = max(minWidth, contentWidth)
+        let newHeight = max(minHeight, contentHeight)
+        
+        let currentSize = element.size.cgSize
+        if abs(currentSize.width - newWidth) > 0.5 || abs(currentSize.height - newHeight) > 0.5 {
+            element.size = CodableSize(CGSize(width: newWidth, height: newHeight))
+        }
     }
     
     private func finishEditing() {

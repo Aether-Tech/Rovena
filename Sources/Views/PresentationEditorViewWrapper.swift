@@ -11,6 +11,10 @@ struct PresentationEditorViewWrapper: View {
             onSave: onSave,
             onClose: onClose
         )
+        .onDisappear {
+            // Auto-save sempre que o editor sai da tela
+            onSave(presentation)
+        }
     }
 }
 

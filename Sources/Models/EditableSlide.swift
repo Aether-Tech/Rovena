@@ -17,6 +17,7 @@ struct EditableElement: Identifiable, Codable {
     var fontSize: CGFloat?
     var fontWeight: String?
     var color: String? // Hex color
+    var rotation: CGFloat? // Rotação em graus
     var zIndex: Int
     
     init(
@@ -28,6 +29,7 @@ struct EditableElement: Identifiable, Codable {
         fontSize: CGFloat? = nil,
         fontWeight: String? = nil,
         color: String? = nil,
+        rotation: CGFloat? = nil,
         zIndex: Int = 0
     ) {
         self.id = id
@@ -38,6 +40,7 @@ struct EditableElement: Identifiable, Codable {
         self.fontSize = fontSize
         self.fontWeight = fontWeight
         self.color = color
+        self.rotation = rotation
         self.zIndex = zIndex
     }
 }

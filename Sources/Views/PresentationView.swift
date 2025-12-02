@@ -369,7 +369,8 @@ struct PresentationView: View {
             topic: prompt,
             languageCode: selectedLanguage.localeCode,
             languageName: selectedLanguage.promptName,
-            imageStyle: selectedImageStyle.promptDescription
+            imageStyle: selectedImageStyle.promptDescription,
+            stylizationLevel: 0
         ) { result in
             DispatchQueue.main.async {
                 self.debugLog = self.presentationService.debugLog
@@ -381,8 +382,20 @@ struct PresentationView: View {
                         editableSlides = presentationService.lastSlides
                     }
                 case .failure(let error):
+                    // Garantir que o estado seja resetado
+                    presentationService.isGenerating = false
+                    presentationService.generationProgress = 0.0
+                    presentationService.currentStep = ""
+                    
                     errorMessage = error.localizedDescription
                     showError = true
+                    
+                    // Log do erro para debug
+                    LogManager.shared.addLog(
+                        "Presentation generation failed: \(error.localizedDescription)",
+                        level: .error,
+                        category: "PresentationView"
+                    )
                 }
             }
         }
@@ -910,12 +923,16 @@ struct MarpPreview: NSViewRepresentable {
                 h1 {
                     font-size: 32px;
                     margin: 0 0 20px 0;
-                    color: #1f2937;
+                    color: #0f172a;
+                    text-shadow: 0 1px 2px rgba(255,255,255,0.8), 0 1px 1px rgba(0,0,0,0.1);
+                    font-weight: 700;
                 }
                 h2 {
                     font-size: 24px;
                     margin: 0 0 15px 0;
-                    color: #374151;
+                    color: #1e293b;
+                    text-shadow: 0 1px 2px rgba(255,255,255,0.8), 0 1px 1px rgba(0,0,0,0.1);
+                    font-weight: 600;
                 }
                 ul {
                     list-style: none;
@@ -924,29 +941,51 @@ struct MarpPreview: NSViewRepresentable {
                 }
                 li {
                     padding: 8px 0;
-                    color: #4b5563;
+                    color: #1e293b;
                     font-size: 16px;
                     position: relative;
                     padding-left: 20px;
+                    text-shadow: 0 1px 2px rgba(255,255,255,0.8), 0 1px 1px rgba(0,0,0,0.1);
+                    font-weight: 500;
                 }
                 li::before {
                     content: "•";
                     position: absolute;
                     left: 0;
                     color: #6366f1;
+                    font-weight: bold;
+                }
+                p {
+                    color: #1e293b;
+                    text-shadow: 0 1px 2px rgba(255,255,255,0.8), 0 1px 1px rgba(0,0,0,0.1);
+                }
+                strong {
+                    color: #0f172a;
+                    font-weight: 700;
                 }
                 .highlight {
                     padding: 12px 16px;
-                    background: rgba(255,255,255,0.85);
+                    background: rgba(255,255,255,0.95);
                     border-left: 4px solid #4338ca;
                     border-radius: 8px;
                     margin: 16px 0;
                     font-weight: 600;
+                    color: #0f172a;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                }
+                .slide.full-bleed .content h1,
+                .slide.full-bleed .content h2,
+                .slide.full-bleed .content li,
+                .slide.full-bleed .content p,
+                .slide.full-bleed .content strong {
+                    color: #fff;
+                    text-shadow: 0 2px 4px rgba(0,0,0,0.8), 0 1px 2px rgba(0,0,0,0.5);
                 }
                 .slide.full-bleed .highlight {
-                    background: rgba(0,0,0,0.35);
+                    background: rgba(0,0,0,0.5);
                     border-color: #fff;
                     color: #fff;
+                    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
                 }
             </style>
         </head>

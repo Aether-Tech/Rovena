@@ -3,6 +3,7 @@ import SwiftUI
 struct PresentationLoadingView: View {
     @ObservedObject var presentationService: PresentationService
     @State private var rotationAngle: Double = 0
+    @State private var showCancelAlert = false
     
     var body: some View {
         VStack(spacing: 32) {
@@ -31,7 +32,7 @@ struct PresentationLoadingView: View {
                     .font(DesignSystem.font(size: 24, weight: .bold))
                     .foregroundColor(DesignSystem.text)
                 
-                Text(presentationService.currentStep)
+                Text(presentationService.currentStep.isEmpty ? "Preparing..." : presentationService.currentStep)
                     .font(DesignSystem.font(size: 16))
                     .foregroundColor(DesignSystem.text.opacity(0.7))
             }
@@ -47,6 +48,24 @@ struct PresentationLoadingView: View {
                     .foregroundColor(DesignSystem.text.opacity(0.5))
             }
             
+            // Cancel button
+            Button(action: {
+                showCancelAlert = true
+            }) {
+                HStack {
+                    Image(systemName: "xmark.circle")
+                    Text("Cancel")
+                }
+                .font(DesignSystem.font(size: 14))
+                .foregroundColor(.red)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 10)
+                .background(Color.red.opacity(0.1))
+                .clipShape(SquircleShape())
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 20)
+            
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -54,6 +73,21 @@ struct PresentationLoadingView: View {
         .onAppear {
             rotationAngle = 360
         }
+        .alert("Cancel Generation?", isPresented: $showCancelAlert) {
+            Button("Cancel", role: .cancel) { }
+            Button("Yes, Cancel", role: .destructive) {
+                cancelGeneration()
+            }
+        } message: {
+            Text("Are you sure you want to cancel the presentation generation? This action cannot be undone.")
+        }
+    }
+    
+    private func cancelGeneration() {
+        LogManager.shared.addLog("User cancelled presentation generation", level: .info, category: "PresentationLoadingView")
+        presentationService.isGenerating = false
+        presentationService.generationProgress = 0.0
+        presentationService.currentStep = ""
     }
 }
 

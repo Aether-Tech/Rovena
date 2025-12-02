@@ -129,7 +129,8 @@ struct HomeView: View {
             
             Spacer()
         }
-        .padding(.vertical, 40)
+        .padding(.top, 40)
+        .padding(.bottom, 20)
         .background(DesignSystem.background)
         .onAppear {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
@@ -392,6 +393,7 @@ struct HomeToDoWidget: View {
                 .buttonStyle(.plain)
                 .padding(.top, 12)
             }
+            .padding(.bottom, 8)
         }
         .sheet(isPresented: $showAddTaskSheet) {
             AddTaskView(isPresented: $showAddTaskSheet)

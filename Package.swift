@@ -10,6 +10,7 @@ let package = Package(
         .executable(name: "Rovena", targets: ["VeroChat"])
     ],
     dependencies: [
+        // Sparkle 2 – framework de auto‑update
         .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.5.0")
     ],
     targets: [

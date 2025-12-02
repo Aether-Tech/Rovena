@@ -41,10 +41,23 @@ class AIService: ObservableObject {
         if SettingsManager.shared.useRovenaCloud {
             let defaultKey = SettingsManager.defaultRovenaAPIKey
             guard !defaultKey.isEmpty else {
-                completion(.failure(NSError(domain: "Rovena", code: 401, userInfo: [NSLocalizedDescriptionKey: "Rovena Cloud API Key not configured. Please set ROVENA_DEFAULT_API_KEY in Config.plist or environment variable."])))
+                let errorMsg = "Rovena Cloud API Key not configured. Please set ROVENA_DEFAULT_API_KEY in Config.plist or environment variable."
+                LogManager.shared.addLog(errorMsg, level: .error, category: "AIService")
+                completion(.failure(NSError(domain: "Rovena", code: 401, userInfo: [NSLocalizedDescriptionKey: errorMsg])))
                 return
             }
+            
+            // Validar formato da chave antes de usar
+            if !defaultKey.hasPrefix("sk-") {
+                let errorMsg = "Invalid API key format. OpenAI API keys should start with 'sk-'. Please check your ROVENA_DEFAULT_API_KEY in Config.plist."
+                LogManager.shared.addLog(errorMsg, level: .error, category: "AIService")
+                completion(.failure(NSError(domain: "Rovena", code: 401, userInfo: [NSLocalizedDescriptionKey: errorMsg])))
+                return
+            }
+            
             apiKey = defaultKey
+            print("🔑 [AIService] Using Rovena Cloud API key (length: \(apiKey.count), prefix: \(apiKey.prefix(15)))")
+            LogManager.shared.addLog("Using Rovena Cloud API key (length: \(apiKey.count), prefix: \(apiKey.prefix(15)))", level: .info, category: "AIService")
             // Verificar limite de tokens antes de fazer requisição quando usar Rovena Cloud
             let estimatedTokens = estimateTokenCount(messages: messages, model: model)
             if !TokenService.shared.canUseTokens(estimatedTokens) {

@@ -78,12 +78,6 @@ jobs:
           </plist>
           EOF
 
-      - name: Sign app (adhoc)
-        run: |
-          # Limpar atributos estendidos e assinar o app para evitar que o macOS mate o binário
-          xattr -cr "${APP_NAME}.app" || true
-          codesign --force --deep --sign - "${APP_NAME}.app"
-
       - name: Create DMG
         run: |
           if ! command -v create-dmg &> /dev/null; then

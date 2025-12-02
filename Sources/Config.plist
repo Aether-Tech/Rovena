@@ -3,9 +3,9 @@
 <plist version="1.0">
 <dict>
 	<key>ROVENA_DEFAULT_API_KEY</key>
-	<string>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</string>
+	<string></string>
 	<key>STRIPE_SECRET_KEY</key>
-	<string>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</string>
+	<string></string>
 </dict>
 </plist>
 

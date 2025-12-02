@@ -1,15 +1,18 @@
 import SwiftUI
+import AppKit
 
 struct PresentationHomeView: View {
     @State private var prompt: String = ""
     @State private var selectedImageStyle: ImageStyleOption = .realism
     @State private var selectedLanguage: PresentationLanguageOption = .portugueseBR
+    @State private var styleLevel: Double = 0 // 0–100 nível de estilização
     @FocusState private var isPromptFocused: Bool
     
     @ObservedObject var presentationService = PresentationService.shared
     @ObservedObject var archiveService = PresentationArchiveService.shared
     
-    var onGenerate: (String, ImageStyleOption, PresentationLanguageOption) -> Void
+    var onGenerate: (String, ImageStyleOption, PresentationLanguageOption, Double) -> Void
+    var onOpenPresentation: ((ArchivedPresentation) -> Void)?
     
     var body: some View {
         VStack(spacing: 0) {
@@ -49,22 +52,53 @@ struct PresentationHomeView: View {
                         }
                     
                     // Options
-                    HStack(spacing: 16) {
-                        Picker("Style", selection: $selectedImageStyle) {
-                            ForEach(ImageStyleOption.allCases) { style in
-                                Text(style.displayName).tag(style)
+                    VStack(spacing: 10) {
+                        HStack(spacing: 16) {
+                            Picker("Style", selection: $selectedImageStyle) {
+                                ForEach(ImageStyleOption.allCases) { style in
+                                    Text(style.displayName).tag(style)
+                                }
                             }
+                            .pickerStyle(.menu)
+                            .frame(maxWidth: .infinity)
+                            
+                            Picker("Language", selection: $selectedLanguage) {
+                                ForEach(PresentationLanguageOption.allCases) { lang in
+                                    Text(lang.displayName).tag(lang)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            .frame(maxWidth: .infinity)
                         }
-                        .pickerStyle(.menu)
-                        .frame(maxWidth: .infinity)
                         
-                        Picker("Language", selection: $selectedLanguage) {
-                            ForEach(PresentationLanguageOption.allCases) { lang in
-                                Text(lang.displayName).tag(lang)
+                        // Stylization level
+                        HStack(spacing: 8) {
+                            Text("Stylization")
+                                .font(DesignSystem.font(size: 12))
+                                .foregroundColor(DesignSystem.text.opacity(0.7))
+                            
+                            Slider(value: $styleLevel, in: 0...100, step: 5) {
+                                Text("Stylization")
                             }
+                            .frame(maxWidth: .infinity)
+                            
+                            TextField("0", value: $styleLevel, format: .number)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(width: 50)
+                                .onChange(of: styleLevel) { oldValue, newValue in
+                                    // Clamp manual edits
+                                    styleLevel = min(100, max(0, newValue))
+                                }
+                            
+                            Text("%")
+                                .font(DesignSystem.font(size: 12))
+                                .foregroundColor(DesignSystem.text.opacity(0.6))
+                            
+                            Image(systemName: "questionmark.circle")
+                                .font(.system(size: 12))
+                                .foregroundColor(DesignSystem.text.opacity(0.5))
+                                .help("Controls how visually styled the slides are. Higher values add decorative backgrounds, colors and layout variation, and may use more tokens during generation.")
                         }
-                        .pickerStyle(.menu)
-                        .frame(maxWidth: .infinity)
                     }
                     
                     // Generate button
@@ -122,7 +156,12 @@ struct PresentationHomeView: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 16) {
                             ForEach(Array(archiveService.presentations.prefix(4))) { presentation in
-                                PresentationCard(presentation: presentation)
+                                PresentationCard(
+                                    presentation: presentation,
+                                    onTap: {
+                                        onOpenPresentation?(presentation)
+                                    }
+                                )
                             }
                         }
                         .padding(.horizontal, 40)
@@ -136,7 +175,7 @@ struct PresentationHomeView: View {
     
     private func generatePresentation() {
         guard !prompt.isEmpty else { return }
-        onGenerate(prompt, selectedImageStyle, selectedLanguage)
+        onGenerate(prompt, selectedImageStyle, selectedLanguage, styleLevel)
     }
 }
 
@@ -144,28 +183,30 @@ struct PresentationHomeView: View {
 
 struct PresentationCard: View {
     let presentation: ArchivedPresentation
+    let onTap: () -> Void
     @State private var isHovered = false
+    @State private var previewImage: NSImage?
     
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            // Preview
-            if let firstSlide = presentation.slides.first,
-               let imageURL = firstSlide.imageURL,
-               let nsImage = NSImage(contentsOf: imageURL) {
-                Image(nsImage: nsImage)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(width: 240, height: 135)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-            } else {
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(DesignSystem.surface)
-                    .frame(width: 240, height: 135)
-                    .overlay(
-                        Image(systemName: "doc.text.fill")
-                            .font(.system(size: 32))
-                            .foregroundColor(DesignSystem.text.opacity(0.3))
-                    )
+            // Preview (lazy loaded to evitar travar ao digitar o prompt)
+            Group {
+                if let previewImage {
+                    Image(nsImage: previewImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: 240, height: 135)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                } else {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(DesignSystem.surface)
+                        .frame(width: 240, height: 135)
+                        .overlay(
+                            Image(systemName: "doc.text.fill")
+                                .font(.system(size: 32))
+                                .foregroundColor(DesignSystem.text.opacity(0.3))
+                        )
+                }
             }
             
             VStack(alignment: .leading, spacing: 4) {
@@ -195,6 +236,39 @@ struct PresentationCard: View {
         .onHover { hovering in
             withAnimation(.easeInOut(duration: 0.2)) {
                 isHovered = hovering
+            }
+            if hovering {
+                NSCursor.pointingHand.push()
+            } else {
+                NSCursor.pop()
+            }
+        }
+        .onTapGesture {
+            onTap()
+        }
+        .task {
+            // Carregar imagem de forma assíncrona e apenas uma vez
+            if previewImage == nil,
+               let firstSlide = presentation.slides.first,
+               let imageURL = firstSlide.imageURL {
+                await loadPreviewImage(from: imageURL)
+            }
+        }
+    }
+    
+    @MainActor
+    private func setPreviewImage(_ image: NSImage?) {
+        self.previewImage = image
+    }
+    
+    private func loadPreviewImage(from url: URL) async {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let image = NSImage(contentsOf: url)
+                DispatchQueue.main.async {
+                    self.previewImage = image
+                    continuation.resume()
+                }
             }
         }
     }

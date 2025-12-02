@@ -1,59 +1,76 @@
 import Foundation
-import Sparkle
 import SwiftUI
+#if canImport(Sparkle)
+import Sparkle
+#endif
 
-// Delegate para fornecer URL do appcast dinamicamente
-class UpdateServiceDelegate: NSObject, SPUUpdaterDelegate {
-    // URL do appcast (feed de atualizações)
-    private let appcastURL = "https://raw.githubusercontent.com/Aether-Tech/Rovena/main/appcast.xml"
-    
-    func feedURLString(for updater: SPUUpdater) -> String? {
-        return appcastURL
-    }
-}
-
+/// Serviço de atualização usando Sparkle
+///
+/// - Usa o `SUFeedURL` definido no Info.plist gerado pelo workflow de release:
+///   https://github.com/Aether-Tech/Rovena/releases/latest/download/appcast.xml
+/// - Em builds de desenvolvimento (sem Info.plist customizado) você ainda pode
+///   configurar um feed alternativo definindo a chave no Info.plist local.
 class UpdateService: ObservableObject {
     static let shared = UpdateService()
-    
-    private let updaterController: SPUStandardUpdaterController
-    private let updaterDelegate = UpdateServiceDelegate()
     
     @Published var isCheckingForUpdates = false
     @Published var updateStatus: String?
     
-    var updater: SPUUpdater {
-        updaterController.updater
-    }
+    #if canImport(Sparkle)
+    /// Controlador padrão do Sparkle 2 (cuida de checagens automáticas + UI)
+    /// Segundo a documentação do Sparkle, o SPUStandardUpdaterController inicia
+    /// automaticamente e gerencia as checagens de atualização em background.
+    private var updaterController: SPUStandardUpdaterController?
+    #endif
     
     private init() {
-        // Configurar Sparkle com delegate para URL dinâmica
-        // startingUpdater: false inicialmente para evitar erros se appcast não existir
+        #if canImport(Sparkle)
+        // Inicializa o Sparkle updater controller
+        // O parâmetro padrão startingUpdater: true inicia automaticamente
+        // e gerencia as checagens automáticas de atualização
         updaterController = SPUStandardUpdaterController(
-            startingUpdater: false,
-            updaterDelegate: updaterDelegate,
+            updaterDelegate: nil,
             userDriverDelegate: nil
         )
-        
-        // Iniciar updater após um pequeno delay para garantir que tudo está pronto
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            self.updaterController.startUpdater()
-        }
+        #endif
     }
     
-    /// Verifica atualizações manualmente
+    #if canImport(Sparkle)
+    private func ensureUpdaterInitialized() {
+        // O updater já é inicializado no init(), mas garantimos que existe
+        if updaterController == nil {
+            updaterController = SPUStandardUpdaterController(
+                updaterDelegate: nil,
+                userDriverDelegate: nil
+            )
+        }
+    }
+    #endif
+    
+    /// Verifica atualizações manualmente (botão em Settings)
     func checkForUpdates() {
+        #if canImport(Sparkle)
+        ensureUpdaterInitialized()
         isCheckingForUpdates = true
         updateStatus = "Verificando atualizações..."
         
-        updater.checkForUpdates()
+        // Mostra o painel padrão do Sparkle
+        updaterController?.checkForUpdates(nil)
         
-        // Resetar status após alguns segundos
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+        // Como não estamos escutando callbacks do Sparkle aqui, limpamos o estado
+        // depois de alguns segundos só para o spinner não ficar preso.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
             self.isCheckingForUpdates = false
             if self.updateStatus == "Verificando atualizações..." {
                 self.updateStatus = nil
             }
         }
+        #else
+        updateStatus = "Auto‑update não disponível neste build (Sparkle indisponível)."
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+            self.updateStatus = nil
+        }
+        #endif
     }
     
     /// Retorna a versão atual do app
@@ -71,4 +88,3 @@ class UpdateService: ObservableObject {
         "\(currentVersion) (\(currentBuild))"
     }
 }
-

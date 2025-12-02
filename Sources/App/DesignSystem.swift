@@ -2,12 +2,14 @@ import SwiftUI
 
 struct DesignSystem {
     static var background: Color {
-        switch SettingsManager.shared.selectedTheme {
+        // Proteção contra acesso durante inicialização
+        let settings = SettingsManager.shared
+        switch settings.selectedTheme {
         case .def:
             // Modern dark grey / soft light
-            return SettingsManager.shared.isDarkMode ? Color(red: 0.12, green: 0.12, blue: 0.13) : Color(red: 0.96, green: 0.96, blue: 0.97)
+            return settings.isDarkMode ? Color(red: 0.12, green: 0.12, blue: 0.13) : Color(red: 0.96, green: 0.96, blue: 0.97)
         case .terminal:
-            return SettingsManager.shared.isDarkMode ? Color.black : Color(white: 0.95)
+            return settings.isDarkMode ? Color.black : Color(white: 0.95)
         }
     }
     

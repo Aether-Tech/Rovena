@@ -26,6 +26,10 @@
 	<string>NSApplication</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>We need access to the microphone to visualize audio levels.</string>
+    <key>SUFeedURL</key>
+    <string>https://github.com/Aether-Tech/Rovena/releases/latest/download/appcast.xml</string>
+    <key>SUPublicEDKey</key>
+    <string>8xZu776RLohr7Jqld6HSdT/H3dPI6k3KXqvclpxgSgw=</string>
 </dict>
 </plist>
 
