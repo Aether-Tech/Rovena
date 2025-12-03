@@ -76,8 +76,6 @@ jobs:
               <true/>
               <key>SUFeedURL</key>
               <string>https://github.com/${{ github.repository }}/releases/latest/download/appcast.xml</string>
-              <key>SUPublicEDKey</key>
-              <string>8xZu776RLohr7Jqld6HSdT/H3dPI6k3KXqvclpxgSgw=</string>
           </dict>
           </plist>
           EOF
