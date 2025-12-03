@@ -48,6 +48,10 @@ canvas_elements.json
 backend/node_modules/
 backend/package-lock.json
 
+# Firebase Functions dependencies and local config
+functions/node_modules/
+functions/.runtimeconfig.json
+
 # Release scripts e documentação local
 *.sh
 *.md

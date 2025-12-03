@@ -1,0 +1,12 @@
+{
+  "name": "rovena",
+  "version": "1.0.0",
+  "description": "Personal AI Workspace for macOS with support for multiple AIs (OpenAI, Anthropic, Gemini).",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}
