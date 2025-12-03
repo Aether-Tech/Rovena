@@ -56,8 +56,8 @@ functions/.runtimeconfig.json
 *.sh
 *.md
 !README.md
+!generate_appcast.sh
 appcast.xml
-generate_appcast.sh
 make_release.sh
 COMO_*.md
 CONFIGURAR_*.md
