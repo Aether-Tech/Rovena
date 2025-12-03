@@ -3,8 +3,12 @@ name: Build and Release
 on:
   push:
     tags:
-      - 'v*'           # Roda em tags tipo v1.0.0, v1.0.1...
-  workflow_dispatch:   # Permite rodar manualmente no botão "Run workflow"
+      - 'v*'           # Roda em tags tipo v1.0.0, v0.3.0 etc.
+  workflow_dispatch:   # Permite rodar manualmente
+
+# Permissões do GITHUB_TOKEN que o Actions injeta automaticamente
+permissions:
+  contents: write      # necessário para criar/atualizar releases
 
 jobs:
   build:
@@ -89,7 +93,8 @@ jobs:
 
       - name: Generate appcast
         run: |
-          chmod +x generate_appcast.sh
+          ls -la
+          chmod +x ./generate_appcast.sh
           ./generate_appcast.sh || echo "Appcast generation skipped (verifique generate_appcast.sh)"
 
       - name: Create Release
